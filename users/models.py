@@ -98,3 +98,12 @@ class UserRole(models.Model):
     class Meta:
         db_table = "user_roles"
         unique_together = ("user", "role")
+
+class RevokedToken(models.Model):
+    jti = models.CharField(max_length=255, unique=True, db_index=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, db_column="user_id")
+    revoked_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField()
+    
+    class Meta:
+        db_table = "revoked_tokens"
