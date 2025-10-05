@@ -66,8 +66,12 @@ class User(models.Model):
 
     # profile optional
     full_name = models.CharField(max_length=200, blank=True, null=True)
-    avatar_url = models.CharField(max_length=200, blank=True, null=True)
+    avatar_url = models.ImageField(upload_to="static/images/avatars/", blank=True, null=True)
     description = models.TextField(blank=True, null=True)
+    dob = models.DateField(blank=True, null=True)
+    gender = models.CharField(max_length=10, blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, null=True)
+    address = models.CharField(max_length=200, blank=True, null=True)
 
     last_login_at = models.DateTimeField(blank=True, null=True)
     last_login_ip = models.GenericIPAddressField(blank=True, null=True)

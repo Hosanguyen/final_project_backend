@@ -8,7 +8,14 @@ from django.utils import timezone
 from datetime import datetime
 
 from .models import User, RevokedToken
-from .serializers import RegisterSerializer, LoginSerializer
+from .serializers import (
+    RegisterSerializer, 
+    LoginSerializer, 
+    UserListSerializer, 
+    AdminUpdateUserSerializer, 
+    UserProfileSerializer, 
+    UserResetPasswordSerializer, 
+    AvatarSerializer)
 from common.authentication import CustomJWTAuthentication
 
 
@@ -45,14 +52,17 @@ class LoginView(APIView):
 
         if not user.check_password(password):
             return Response({"detail": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
-
+        if not user.active:
+            return Response({"detail": "User is not active"}, status=status.HTTP_401_UNAUTHORIZED)
         # cập nhật last_login
         user.last_login_at = timezone.now()
         user.last_login_ip = request.META.get("REMOTE_ADDR")
         user.save(update_fields=["last_login_at", "last_login_ip"])
-
+        full_name = user.full_name
         tokens = get_tokens_for_user(user)
-        return Response({"tokens": tokens})
+        return Response({
+            "tokens": tokens,
+            "full_name": full_name})
 
 
 class HelloAPIView(APIView):
@@ -77,7 +87,6 @@ class RefreshTokenView(APIView):
         try:
             refresh = RefreshToken(refresh_token)
             
-            access_token = str(refresh.access_token)
             jti = refresh.get('jti')
 
             if RevokedToken.objects.filter(jti=jti).exists():
@@ -144,3 +153,75 @@ class LogoutView(APIView):
                 {"detail": str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        
+class AdminCRUDUser(APIView):
+    authentication_classes = [CustomJWTAuthentication]  
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            tokens = get_tokens_for_user(user)
+            return Response({"user": serializer.data, "tokens": tokens}, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+    def get(self, request):
+        users = User.objects.all()
+        serializer = UserListSerializer(users, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    def put(self, request, id):
+        user = User.objects.get(id=id)
+        if not user:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        serializer = AdminUpdateUserSerializer(user, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, id):
+        user = User.objects.get(id=id)
+        if not user:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        user.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+class UserProfileView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        serializer = UserProfileSerializer(user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    def put(self, request):
+        user = request.user
+        serializer = UserProfileSerializer(user, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+    
+class UserResetPasswordView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def put(self, request):
+        user = request.user
+        serializer = UserResetPasswordSerializer(user, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+class UserAvatarView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def put(self, request):
+        user = request.user
+        serializer = AvatarSerializer(user, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
