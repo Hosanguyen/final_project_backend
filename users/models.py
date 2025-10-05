@@ -66,8 +66,12 @@ class User(models.Model):
 
     # profile optional
     full_name = models.CharField(max_length=200, blank=True, null=True)
-    avatar_url = models.CharField(max_length=200, blank=True, null=True)
+    avatar_url = models.ImageField(upload_to="images/avatars/", blank=True, null=True)
     description = models.TextField(blank=True, null=True)
+    dob = models.DateField(blank=True, null=True)
+    gender = models.CharField(max_length=10, blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, null=True)
+    address = models.CharField(max_length=200, blank=True, null=True)
 
     last_login_at = models.DateTimeField(blank=True, null=True)
     last_login_ip = models.GenericIPAddressField(blank=True, null=True)
@@ -89,6 +93,12 @@ class User(models.Model):
     @property
     def is_authenticated(self):
         return True
+
+    @property
+    def is_staff(self):
+        if self.username == 'admin':
+            return True
+        return False
 
 class UserRole(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, db_column="user_id")
