@@ -59,11 +59,11 @@ class LoginView(APIView):
         user.last_login_at = timezone.now()
         user.last_login_ip = request.META.get("REMOTE_ADDR")
         user.save(update_fields=["last_login_at", "last_login_ip"])
-        full_name = user.full_name
+        user_data = UserProfileSerializer(user).data
         tokens = get_tokens_for_user(user)
         return Response({
             "tokens": tokens,
-            "full_name": full_name})
+            "user": user_data})
 
 
 class HelloAPIView(APIView):
@@ -205,6 +205,14 @@ class UserProfileView(APIView):
         user = request.user
         serializer = UserProfileSerializer(user, data=request.data, partial=True)
         if serializer.is_valid():
+            if request.data.get("is_delete_avatar", False):
+                if user.avatar_url:
+                    try:
+                        user.avatar_url.delete(save=False)
+                    except Exception as e:
+                        print(f"Error deleting avatar: {e}")
+                    user.avatar_url = None
+                    user.save(update_fields=["avatar_url"])
             serializer.save()
             return Response({"detail": "User updated successfully.", "user": serializer.data}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
