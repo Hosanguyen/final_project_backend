@@ -59,11 +59,11 @@ class LoginView(APIView):
         user.last_login_at = timezone.now()
         user.last_login_ip = request.META.get("REMOTE_ADDR")
         user.save(update_fields=["last_login_at", "last_login_ip"])
-        full_name = user.full_name
+        user_data = UserProfileSerializer(user).data
         tokens = get_tokens_for_user(user)
         return Response({
             "tokens": tokens,
-            "full_name": full_name})
+            "user": user_data})
 
 
 class HelloAPIView(APIView):
