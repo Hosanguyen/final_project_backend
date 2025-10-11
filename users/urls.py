@@ -9,7 +9,18 @@ from .views import (
     AdminCRUDUser, 
     UserProfileView, 
     UserResetPasswordView, 
-    UserAvatarView)
+    UserAvatarView,
+    PermissionCategoryListCreateView,
+    PermissionCategoryDetailView,
+    PermissionListCreateView,
+    PermissionDetailView,
+    RoleListCreateView,
+    RoleDetailView,
+    RoleAssignPermissionsView,
+    RoleRemovePermissionsView,
+    AllPermissionsForSelectionView,
+    AllRolesForSelectionView,
+)
 
 
 urlpatterns = [
@@ -27,4 +38,24 @@ urlpatterns = [
     path('profile/reset-password/', UserResetPasswordView.as_view(), name='user_reset_password'),
     path('profile/avatar/', UserAvatarView.as_view(), name='user_avatar'),
     path('profile/avatar/delete/', UserAvatarView.as_view(), name='user_avatar_delete'),
+
+    # PERMISSION CATEGORY
+    path('permission-categories/', PermissionCategoryListCreateView.as_view(), name='permission-categories-list-create'),
+    path('permission-categories/<int:id>/', PermissionCategoryDetailView.as_view(), name='permission-categories-detail'),
+    
+    # PERMISSION
+    path('permissions/', PermissionListCreateView.as_view(), name='permissions-list-create'),
+    path('permissions/<int:id>/', PermissionDetailView.as_view(), name='permissions-detail'),
+    
+    # ROLE
+    path('roles/', RoleListCreateView.as_view(), name='roles-list-create'),
+    path('roles/<int:id>/', RoleDetailView.as_view(), name='roles-detail'),
+    
+    # Role Permissions Management
+    path('roles/<int:role_id>/assign-permissions/', RoleAssignPermissionsView.as_view(), name='role-assign-permissions'),
+    path('roles/<int:role_id>/remove-permissions/', RoleRemovePermissionsView.as_view(), name='role-remove-permissions'),
+    
+    # HELPER VIEWS (cho frontend)
+    path('selections/permissions/', AllPermissionsForSelectionView.as_view(), name='selections-permissions'),
+    path('selections/roles/', AllRolesForSelectionView.as_view(), name='selections-roles'),
 ]
