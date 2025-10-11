@@ -8,7 +8,7 @@ from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from datetime import datetime
 
-from .models import User, RevokedToken
+from .models import User, RevokedToken, Role, Permission, PermissionCategory
 from .serializers import (
     RegisterSerializer, 
     LoginSerializer, 
@@ -16,7 +16,17 @@ from .serializers import (
     AdminUpdateUserSerializer, 
     UserProfileSerializer, 
     UserResetPasswordSerializer, 
-    AvatarSerializer)
+    AvatarSerializer,
+    PermissionCategorySerializer,
+    PermissionCategoryListSerializer,
+    PermissionSerializer,
+    PermissionListSerializer,
+    RoleSerializer,
+    RoleListSerializer,
+    RoleCreateUpdateSerializer,
+    AssignPermissionsToRoleSerializer,
+    RemovePermissionsFromRoleSerializer
+)
 from common.authentication import CustomJWTAuthentication
 
 
@@ -253,3 +263,315 @@ class UserAvatarView(APIView):
         user.avatar_url = None
         user.save(update_fields=["avatar_url"])
         return Response({"detail": "Avatar deleted successfully."}, status=status.HTTP_200_OK)
+
+
+
+# PERMISSION CATEGORY CRUD
+
+class PermissionCategoryListCreateView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        categories = PermissionCategory.objects.all().order_by('name')
+        serializer = PermissionCategoryListSerializer(categories, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        serializer = PermissionCategorySerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {
+                    "detail": "Permission category created successfully",
+                    "data": serializer.data
+                },
+                status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PermissionCategoryDetailView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, id):
+        category = get_object_or_404(PermissionCategory, id=id)
+        serializer = PermissionCategorySerializer(category)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def put(self, request, id):
+        category = get_object_or_404(PermissionCategory, id=id)
+        serializer = PermissionCategorySerializer(category, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {
+                    "detail": "Permission category updated successfully",
+                    "data": serializer.data
+                },
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, id):
+        category = get_object_or_404(PermissionCategory, id=id)
+        category_name = category.name
+        category.delete()
+        return Response(
+            {"detail": f"Permission category '{category_name}' deleted successfully"},
+            status=status.HTTP_200_OK
+        )
+
+
+# PERMISSION CRUD
+
+class PermissionListCreateView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        permissions = Permission.objects.all().select_related('category').order_by('code')
+        serializer = PermissionListSerializer(permissions, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        serializer = PermissionSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {
+                    "detail": "Permission created successfully",
+                    "data": serializer.data
+                },
+                status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PermissionDetailView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, id):
+        permission = get_object_or_404(Permission.objects.select_related('category'), id=id)
+        serializer = PermissionSerializer(permission)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def put(self, request, id):
+        permission = get_object_or_404(Permission, id=id)
+        serializer = PermissionSerializer(permission, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {
+                    "detail": "Permission updated successfully",
+                    "data": serializer.data
+                },
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, id):
+        permission = get_object_or_404(Permission, id=id)
+        permission_code = permission.code
+        permission.delete()
+        return Response(
+            {"detail": f"Permission '{permission_code}' deleted successfully"},
+            status=status.HTTP_200_OK
+        )
+
+
+# ROLE CRUD (với quản lý permissions)
+
+class RoleListCreateView(APIView):
+    """
+    GET: Lấy danh sách tất cả Role (không có permissions chi tiết)
+    POST: Tạo Role mới VÀ gán permissions luôn
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        roles = Role.objects.all().order_by('name')
+        serializer = RoleListSerializer(roles, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        serializer = RoleCreateUpdateSerializer(data=request.data)
+        if serializer.is_valid():
+            role = serializer.save()
+            
+            response_serializer = RoleSerializer(role)
+            return Response(
+                {
+                    "detail": "Role created successfully",
+                    "data": response_serializer.data
+                },
+                status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class RoleDetailView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, id):
+        role = get_object_or_404(
+            Role.objects.prefetch_related('permissions__category'), 
+            id=id
+        )
+        serializer = RoleSerializer(role)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def put(self, request, id):
+        role = get_object_or_404(Role, id=id)
+        serializer = RoleCreateUpdateSerializer(role, data=request.data, partial=True)
+        
+        if serializer.is_valid():
+            updated_role = serializer.save()
+            
+            response_serializer = RoleSerializer(updated_role)
+            return Response(
+                {
+                    "detail": "Role updated successfully",
+                    "data": response_serializer.data
+                },
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, id):
+        role = get_object_or_404(Role, id=id)
+        role_name = role.name
+        
+        user_count = role.users.count()
+        if user_count > 0:
+            return Response(
+                {
+                    "detail": f"Cannot delete role '{role_name}'. It is assigned to {user_count} user(s)."
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        role.delete()
+        return Response(
+            {"detail": f"Role '{role_name}' deleted successfully"},
+            status=status.HTTP_200_OK
+        )
+
+
+# ROLE PERMISSIONS MANAGEMENT (Thêm/Xóa permissions từ role)
+
+class RoleAssignPermissionsView(APIView):
+    """
+    POST: THÊM permissions vào role (không xóa permissions cũ)
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, role_id):
+        """
+        Request body:
+        {
+            "permission_ids": [7, 8, 9]
+        }
+        """
+        role = get_object_or_404(Role, id=role_id)
+        serializer = AssignPermissionsToRoleSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            permission_ids = serializer.validated_data["permission_ids"]
+            permissions = Permission.objects.filter(id__in=permission_ids)
+            
+            # THÊM permissions (không xóa cái cũ)
+            role.permissions.add(*permissions)
+            
+            # Trả về role với permissions đầy đủ
+            response_serializer = RoleSerializer(role)
+            return Response(
+                {
+                    "detail": f"Added {len(permissions)} permission(s) to role '{role.name}'",
+                    "data": response_serializer.data
+                },
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class RoleRemovePermissionsView(APIView):
+    """
+    POST: XÓA permissions khỏi role
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, role_id):
+        """
+        Request body:
+        {
+            "permission_ids": [7, 8]
+        }
+        """
+        role = get_object_or_404(Role, id=role_id)
+        serializer = RemovePermissionsFromRoleSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            permission_ids = serializer.validated_data["permission_ids"]
+            permissions = Permission.objects.filter(id__in=permission_ids)
+            
+            # XÓA permissions
+            role.permissions.remove(*permissions)
+            
+            # Trả về role với permissions đầy đủ
+            response_serializer = RoleSerializer(role)
+            return Response(
+                {
+                    "detail": f"Removed {len(permissions)} permission(s) from role '{role.name}'",
+                    "data": response_serializer.data
+                },
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# HELPER VIEWS (Lấy danh sách để hiển thị dropdown/checkbox)
+
+class AllPermissionsForSelectionView(APIView):
+    """
+    GET: Lấy tất cả permissions nhóm theo category
+    Dùng cho frontend hiển thị checkbox khi tạo/sửa role
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        categories = PermissionCategory.objects.prefetch_related('permission_set').all()
+        
+        result = []
+        for category in categories:
+            permissions = category.permission_set.all().order_by('code')
+            result.append({
+                "category_id": category.id,
+                "category_name": category.name,
+                "category_description": category.description,
+                "permissions": PermissionListSerializer(permissions, many=True).data
+            })
+        
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class AllRolesForSelectionView(APIView):
+    """
+    GET: Lấy tất cả roles (chỉ id và name)
+    Dùng cho frontend hiển thị dropdown khi gán role cho user
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .serializers import RoleSimpleSerializer
+        roles = Role.objects.all().order_by('name')
+        serializer = RoleSimpleSerializer(roles, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
