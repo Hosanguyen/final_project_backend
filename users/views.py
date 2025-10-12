@@ -575,3 +575,16 @@ class AllRolesForSelectionView(APIView):
         roles = Role.objects.all().order_by('name')
         serializer = RoleSimpleSerializer(roles, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from django.apps import apps
+
+class ModelListView(APIView):
+    def get(self, request):
+        hide_apps = ['admin', 'auth', 'contenttypes', 'sessions']
+        models = [
+            model.__name__
+            for model in apps.get_models() if model._meta.app_label not in hide_apps
+        ]
+        return Response(models)
