@@ -20,6 +20,7 @@ from .views import (
     RoleRemovePermissionsView,
     AllPermissionsForSelectionView,
     AllRolesForSelectionView,
+    ModelListView,
 )
 
 
@@ -58,4 +59,6 @@ urlpatterns = [
     # HELPER VIEWS (cho frontend)
     path('selections/permissions/', AllPermissionsForSelectionView.as_view(), name='selections-permissions'),
     path('selections/roles/', AllRolesForSelectionView.as_view(), name='selections-roles'),
+
+    path('model/list/', ModelListView.as_view(), name="Model List")
 ]
