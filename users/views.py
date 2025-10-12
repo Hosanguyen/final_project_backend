@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
+from django.apps import apps
 from datetime import datetime
 
 from .models import User, RevokedToken, Role, Permission, PermissionCategory
@@ -575,10 +576,6 @@ class AllRolesForSelectionView(APIView):
         roles = Role.objects.all().order_by('name')
         serializer = RoleSimpleSerializer(roles, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
-
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from django.apps import apps
 
 class ModelListView(APIView):
     def get(self, request):
