@@ -56,19 +56,6 @@ class RolePermission(models.Model):
         unique_together = ("role", "permission")
 
 
-class Tag(models.Model):
-    id = models.BigAutoField(primary_key=True)
-    name = models.CharField(max_length=100, unique=True)
-    slug = models.CharField(max_length=120, unique=True, blank=True, null=True)
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = "tags"
-
-    def __str__(self):
-        return self.name
-
-
 class User(models.Model):
     id = models.BigAutoField(primary_key=True)
     username = models.CharField(max_length=50, unique=True)
