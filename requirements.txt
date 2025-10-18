@@ -1,0 +1,28 @@
+# Core
+Django==4.2.7
+djangorestframework==3.14.0
+djangorestframework-simplejwt==5.3.1
+
+# Database
+psycopg2-binary==2.9.9
+
+# Security & CORS
+django-cors-headers==4.3.1
+argon2-cffi==23.1.0
+
+# Environment
+python-decouple==3.8
+
+# Utilities
+pytz==2023.3
+Pillow==10.1.0
+
+# Production Server
+gunicorn==21.2.0 # Linux
+waitress==2.1.2 # Window
+whitenoise==6.6.0
+
+# Development (comment out in production)
+# django-debug-toolbar==4.2.0
+# pytest==7.4.3
+# pytest-django==4.7.0
