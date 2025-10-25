@@ -297,8 +297,22 @@ class LessonResourceView(APIView):
 
     def post(self, request):
         """Tạo lesson resource mới"""
-        serializer = LessonResourceSerializer(data=request.data)
-        if serializer.is_valid():
+        uploaded_file = request.FILES.get('file')
+        if uploaded_file:
+            file_instance = File.objects.create(
+                storage_key=uploaded_file,
+                filename=uploaded_file.name,
+                file_type=uploaded_file.content_type,
+                size=uploaded_file.size,
+                is_public=True
+            )
+            data = request.data.copy()
+            data['file'] = file_instance.id
+        else:
+            data = request.data
+
+        serializer = LessonResourceSerializer(data=data)
+        if serializer.is_valid(raise_exception=True):
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
