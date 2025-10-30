@@ -22,8 +22,8 @@ class Permission(models.Model):
     id = models.BigAutoField(primary_key=True)
     code = models.CharField(max_length=100, unique=True)  # e.g. "course.create"
     description = models.CharField(max_length=255, blank=True, null=True)
-    model_name = models.CharField(max_length=255, null=False)
-    perm = models.CharField(max_length=255, null=False) # create || read || update || delete
+    model_name = models.CharField(max_length=255, null=True)
+    perm = models.CharField(max_length=255, null=True) # create || read || update || delete
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     category = models.ForeignKey("PermissionCategory", on_delete=models.SET_NULL, blank=True, null=True, db_column="category_id")
