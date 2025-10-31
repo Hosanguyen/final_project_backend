@@ -180,7 +180,10 @@ CORS_ALLOW_METHODS = [
     "POST",
     "PUT",
 ]
+from dotenv import load_dotenv
 import os
+
+load_dotenv()
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
@@ -191,6 +194,6 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / "media"
 
-DOMJUDGE_API_URL = os.getenv('DOMJUDGE_API_URL', 'http://localhost:8088/api/v4')
+DOMJUDGE_API_URL = os.getenv('DOMJUDGE_API_URL', 'http://localhost:8080/api/v4')
 DOMJUDGE_USERNAME = os.getenv('DOMJUDGE_USERNAME', 'admin')
-DOMJUDGE_PASSWORD = os.getenv('DOMJUDGE_PASSWORD', 'gFO5CnKMlpVqTlX7')
+DOMJUDGE_PASSWORD = os.getenv('DOMJUDGE_PASSWORD', '12345')

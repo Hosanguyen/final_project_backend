@@ -8,10 +8,10 @@ from course.models import File
 
 class DOMjudgeService:
     def __init__(self):
-        self.api_url = getattr(settings, 'DOMJUDGE_API_URL', 'http://localhost:8088/api/v4')
+        self.api_url = getattr(settings, 'DOMJUDGE_API_URL', 'http://localhost:8080/api/v4')
         self.username = getattr(settings, 'DOMJUDGE_USERNAME', 'admin')
-        self.password = getattr(settings, 'DOMJUDGE_PASSWORD', 'gFO5CnKMlpVqTlX7')
-    
+        self.password = getattr(settings, 'DOMJUDGE_PASSWORD', '12345')
+
     def sync_problem(self, problem):
         """
         Đồng bộ problem lên DOMjudge
