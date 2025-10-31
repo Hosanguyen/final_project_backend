@@ -94,7 +94,15 @@ DATABASES = {
         'OPTIONS': {
             'charset': 'utf8mb4',
         },
-    }
+    },
+    'domjudge': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'domjudge',
+        'USER': 'domjudge',
+        'PASSWORD': 'djpw',
+        'HOST': 'localhost',
+        'PORT': '13306',
+    },
 }
 
 
