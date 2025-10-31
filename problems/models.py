@@ -145,3 +145,22 @@ class TestCase(models.Model):
     def __str__(self):
         return f"{self.problem.title} - Test #{self.sequence}"
 
+class Submissions(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    problem = models.ForeignKey(Problem, on_delete=models.CASCADE, related_name="submissions")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="submissions")
+    language = models.ForeignKey(Language, on_delete=models.SET_NULL, null=True, related_name="submissions")
+    code_file = models.ForeignKey(File, on_delete=models.SET_NULL, null=True, related_name="submissions")
+    code_text = models.TextField(null=True, blank=True)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=50, null=True, blank=True)
+    score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    feedback = models.TextField(null=True, blank=True)
+    domjudge_submission_id = models.BigIntegerField(null=True, blank=True)
+
+    class Meta:
+        db_table = "submissions"
+        ordering = ["-submitted_at"]
+
+    def __str__(self):
+        return f"Submission #{self.id} by {self.user.username} for {self.problem.title}"

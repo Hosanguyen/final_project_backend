@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Problem, TestCase, TagProblem
+from .models import Problem, TestCase, TagProblem, Submissions
 from course.models import Tag, Language
 from users.serializers import UserListSerializer
 
@@ -271,3 +271,46 @@ class SyncToDOMjudgeSerializer(serializers.Serializer):
         default=False,
         help_text="Force sync even if already synced"
     )
+
+
+# ============================================================
+# SUBMISSION SERIALIZERS
+# ============================================================
+
+class SubmissionCreateSerializer(serializers.Serializer):
+    """Create submission"""
+    language_id = serializers.IntegerField(required=True)
+    code = serializers.CharField(required=True, allow_blank=False)
+    
+    def validate_language_id(self, value):
+        if not Language.objects.filter(id=value).exists():
+            raise serializers.ValidationError("Language không tồn tại")
+        return value
+
+
+class SubmissionSerializer(serializers.ModelSerializer):
+    """Submission detail"""
+    problem = ProblemListSerializer(read_only=True)
+    user = UserListSerializer(read_only=True)
+    language = LanguageSimpleSerializer(read_only=True)
+    
+    class Meta:
+        model = Submissions
+        fields = [
+            "id", "problem", "user", "language",
+            "code_text", "submitted_at", "status",
+            "score", "feedback", "domjudge_submission_id"
+        ]
+        read_only_fields = ["id", "submitted_at"]
+
+
+class SubmissionListSerializer(serializers.ModelSerializer):
+    """Submission list (simplified)"""
+    language = LanguageSimpleSerializer(read_only=True)
+    
+    class Meta:
+        model = Submissions
+        fields = [
+            "id", "language", "submitted_at",
+            "status", "score"
+        ]

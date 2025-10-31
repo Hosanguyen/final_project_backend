@@ -8,9 +8,9 @@ from course.models import File
 
 class DOMjudgeService:
     def __init__(self):
-        self.api_url = getattr(settings, 'DOMJUDGE_API_URL', 'http://localhost:8080/api/v4')
+        self.api_url = getattr(settings, 'DOMJUDGE_API_URL', 'http://localhost:8088/api/v4')
         self.username = getattr(settings, 'DOMJUDGE_USERNAME', 'admin')
-        self.password = getattr(settings, 'DOMJUDGE_PASSWORD', '12345')
+        self.password = getattr(settings, 'DOMJUDGE_PASSWORD', 'gFO5CnKMlpVqTlX7')
     
     def sync_problem(self, problem):
         """
@@ -165,21 +165,38 @@ timelimit: {problem.time_limit_ms / 1000}
         except Exception as e:
             print(f"Error deleting from DOMjudge: {str(e)}")
     
-    def submit_code(self, problem, language, source_code):
+    def submit_code(self, problem, language, source_code, contest_id=None, team_id=None):
         """
         Submit code đến DOMjudge để chấm
-        Returns: submission_id
+        Returns: submission data (dict with id, language_id, problem_id, etc.)
         """
-        url = f"{self.api_url}/submissions"
+        # Nếu có contest_id thì submit vào contest, không thì submit trực tiếp
+        if contest_id:
+            url = f"{self.api_url}/contests/{contest_id}/submissions"
+        else:
+            url = f"{self.api_url}/submissions"
+        
+        # Xác định extension dựa trên language code
+        extension_map = {
+            'c': 'c',
+            'cpp': 'cpp',
+            'java': 'java',
+            'py': 'py',
+            'python3': 'py',
+            'js': 'js',
+            'javascript': 'js'
+        }
+        extension = extension_map.get(language.code.lower(), language.code)
+        filename = f"solution.{extension}"
         
         data = {
             'problem': problem.domjudge_problem_id,
             'language': language.code,
-            'entry_point': 'main',  # hoặc tùy language
+            'team_id': team_id if team_id else 'exteam'
         }
         
         files = {
-            'code[]': ('solution.' + language.code, source_code.encode('utf-8'))
+            'code[]': (filename, source_code.encode('utf-8'), 'text/plain')
         }
         
         response = requests.post(
@@ -189,8 +206,8 @@ timelimit: {problem.time_limit_ms / 1000}
             auth=(self.username, self.password)
         )
         
-        if response.status_code == 200:
-            return response.json()['id']
+        if response.status_code in [200, 201]:
+            return response.json()
         else:
             raise Exception(f"Submit failed: {response.status_code} - {response.text}")
     
