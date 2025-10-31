@@ -336,3 +336,225 @@ class ProblemStatisticsView(APIView):
         }
         
         return Response(stats)
+
+
+class SubmissionCreateView(APIView):
+    """
+    POST: Submit code to problem
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, problem_id):
+        from .models import Submissions
+        from course.models import Language
+        from .serializers import SubmissionCreateSerializer, SubmissionSerializer
+        
+        problem = get_object_or_404(Problem, id=problem_id)
+        
+        # Validate input
+        serializer = SubmissionCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        language_id = serializer.validated_data['language_id']
+        code = serializer.validated_data['code']
+        
+        # Kiểm tra language có được phép không
+        language = get_object_or_404(Language, id=language_id)
+        if problem.allowed_languages.exists() and language not in problem.allowed_languages.all():
+            return Response({
+                "error": f"Ngôn ngữ {language.name} không được phép cho bài này"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Kiểm tra problem đã sync với DOMjudge chưa
+        if not problem.is_synced_to_domjudge or not problem.domjudge_problem_id:
+            return Response({
+                "error": "Problem chưa được đồng bộ với DOMjudge"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Tạo submission trong DB
+        submission = Submissions.objects.create(
+            problem=problem,
+            user=request.user,
+            language=language,
+            code_text=code,
+            status="pending"
+        )
+        
+        # Submit lên DOMjudge
+        try:
+            domjudge_service = DOMjudgeService()
+            contest_id = request.data.get('contest_id') or 'practice'  # Optional
+            team_id = request.data.get('team_id') or 'exteam'  # Optional
+            domjudge_response = domjudge_service.submit_code(
+                problem=problem,
+                language=language,
+                source_code=code,
+                contest_id=contest_id,
+                team_id=team_id
+            )
+            
+            # Lưu submission ID từ DOMjudge
+            submission.domjudge_submission_id = domjudge_response.get('id') or domjudge_response.get('submitid')
+            submission.status = "judging"
+            submission.save()
+            
+            result_serializer = SubmissionSerializer(submission)
+            
+            return Response({
+                "detail": "Code submitted successfully",
+                "submission": result_serializer.data,
+                "domjudge_response": domjudge_response
+            }, status=status.HTTP_201_CREATED)
+        
+        except Exception as e:
+            # Đánh dấu submission failed
+            submission.status = "error"
+            submission.feedback = str(e)
+            submission.save()
+            
+            return Response({
+                "error": f"Submit to DOMjudge failed: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class SubmissionListView(APIView):
+    """
+    GET: List submissions for a problem (or all submissions by user)
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, problem_id=None):
+        from .models import Submissions
+        from .serializers import SubmissionListSerializer
+        
+        if problem_id:
+            submissions = Submissions.objects.filter(problem_id=problem_id)
+        else:
+            submissions = Submissions.objects.all()
+        
+        # Filter by user (chỉ xem submission của mình, trừ admin)
+        if not request.user.is_staff:
+            submissions = submissions.filter(user=request.user)
+        
+        # Sync status from DOMjudge cho các submission đang judging
+        sync_from_domjudge = request.query_params.get('sync', 'true').lower() == 'true'
+        if sync_from_domjudge:
+            self._sync_submissions_status(submissions)
+        
+        # Ordering
+        ordering = request.query_params.get('ordering', '-submitted_at')
+        submissions = submissions.order_by(ordering)
+        
+        # Pagination
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 20))
+        start = (page - 1) * page_size
+        end = start + page_size
+        
+        total = submissions.count()
+        submissions = submissions[start:end]
+        
+        serializer = SubmissionListSerializer(submissions, many=True)
+        
+        return Response({
+            "results": serializer.data,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total + page_size - 1) // page_size
+        })
+    
+    def _sync_submissions_status(self, submissions):
+        """Sync status từ DOMjudge cho các submission đang judging"""
+        domjudge_service = DOMjudgeService()
+        contest_id = None  # Có thể lấy từ settings hoặc request params
+        
+        for submission in submissions.filter(status='judging'):
+            if submission.domjudge_submission_id:
+                try:
+                    # Lấy judgement từ DOMjudge
+                    judgement = domjudge_service.get_judgement(
+                        submission.domjudge_submission_id,
+                        contest_id=contest_id
+                    )
+                    
+                    if judgement and judgement.get('valid'):
+                        # Cập nhật status từ judgement_type_id
+                        judgement_type = judgement.get('judgement_type_id', 'unknown')
+                        submission.status = judgement_type.lower()
+                        
+                        # Cập nhật score (nếu AC thì 100, không thì 0)
+                        if judgement_type == 'AC':
+                            submission.score = 100.00
+                        else:
+                            submission.score = 0.00
+                        
+                        # Cập nhật feedback
+                        submission.feedback = f"Max run time: {judgement.get('max_run_time', 0)}s"
+                        submission.save()
+                
+                except Exception as e:
+                    print(f"Failed to sync submission {submission.id}: {str(e)}")
+                    continue
+
+
+class SubmissionDetailView(APIView):
+    """
+    GET: Get submission detail and sync result from DOMjudge
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, submission_id):
+        from .models import Submissions
+        from .serializers import SubmissionSerializer
+        
+        submission = get_object_or_404(Submissions, id=submission_id)
+        
+        # Check permission (chỉ xem submission của mình hoặc admin)
+        if not request.user.is_staff and submission.user != request.user:
+            return Response({
+                "error": "Bạn không có quyền xem submission này"
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Nếu submission đang judging, lấy kết quả mới nhất từ DOMjudge
+        if submission.status == "judging" and submission.domjudge_submission_id:
+            try:
+                domjudge_service = DOMjudgeService()
+                contest_id = request.query_params.get('contest_id')
+                
+                # Lấy judgement từ DOMjudge
+                judgement = domjudge_service.get_judgement(
+                    submission.domjudge_submission_id,
+                    contest_id=contest_id
+                )
+                
+                if judgement and judgement.get('valid'):
+                    # Cập nhật status từ judgement_type_id
+                    judgement_type = judgement.get('judgement_type_id', 'unknown')
+                    submission.status = judgement_type.lower()
+                    
+                    # Cập nhật score
+                    if judgement_type == 'AC':
+                        submission.score = 100.00
+                    else:
+                        submission.score = 0.00
+                    
+                    # Cập nhật feedback với chi tiết từ judgement
+                    feedback_parts = [
+                        f"Judgement: {judgement_type}",
+                        f"Max run time: {judgement.get('max_run_time', 0)}s",
+                        f"Start time: {judgement.get('start_contest_time', 'N/A')}",
+                        f"End time: {judgement.get('end_contest_time', 'N/A')}"
+                    ]
+                    submission.feedback = "\n".join(feedback_parts)
+                    submission.save()
+            
+            except Exception as e:
+                print(f"Failed to sync submission result: {str(e)}")
+        
+        serializer = SubmissionSerializer(submission)
+        return Response(serializer.data)

@@ -180,7 +180,10 @@ CORS_ALLOW_METHODS = [
     "POST",
     "PUT",
 ]
+from dotenv import load_dotenv
 import os
+
+load_dotenv()
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [

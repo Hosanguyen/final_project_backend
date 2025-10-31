@@ -2,7 +2,8 @@ from django.urls import path
 from .views import (
     ProblemListCreateView, ProblemDetailView,
     ProblemTestCasesView, TestCaseDetailView,
-    ProblemStatisticsView
+    ProblemStatisticsView,
+    SubmissionCreateView, SubmissionListView, SubmissionDetailView
 )
 
 urlpatterns = [
@@ -16,4 +17,10 @@ urlpatterns = [
     
     # Statistics
     path('<int:id>/statistics/', ProblemStatisticsView.as_view(), name='problem-statistics'),
+    
+    # Submissions
+    path('<int:problem_id>/submissions/', SubmissionCreateView.as_view(), name='submission-create'),
+    path('<int:problem_id>/submissions/list/', SubmissionListView.as_view(), name='submission-list-by-problem'),
+    path('submissions/', SubmissionListView.as_view(), name='submission-list-all'),
+    path('submissions/<int:submission_id>/', SubmissionDetailView.as_view(), name='submission-detail'),
 ]

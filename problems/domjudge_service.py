@@ -11,7 +11,7 @@ class DOMjudgeService:
         self.api_url = getattr(settings, 'DOMJUDGE_API_URL', 'http://localhost:8080/api/v4')
         self.username = getattr(settings, 'DOMJUDGE_USERNAME', 'admin')
         self.password = getattr(settings, 'DOMJUDGE_PASSWORD', '12345')
-    
+
     def sync_problem(self, problem):
         """
         Đồng bộ problem lên DOMjudge
@@ -165,21 +165,38 @@ timelimit: {problem.time_limit_ms / 1000}
         except Exception as e:
             print(f"Error deleting from DOMjudge: {str(e)}")
     
-    def submit_code(self, problem, language, source_code):
+    def submit_code(self, problem, language, source_code, contest_id=None, team_id=None):
         """
         Submit code đến DOMjudge để chấm
-        Returns: submission_id
+        Returns: submission data (dict with id, language_id, problem_id, etc.)
         """
-        url = f"{self.api_url}/submissions"
+        # Nếu có contest_id thì submit vào contest, không thì submit trực tiếp
+        if contest_id:
+            url = f"{self.api_url}/contests/{contest_id}/submissions"
+        else:
+            url = f"{self.api_url}/submissions"
+        
+        # Xác định extension dựa trên language code
+        extension_map = {
+            'c': 'c',
+            'cpp': 'cpp',
+            'java': 'java',
+            'py': 'py',
+            'python3': 'py',
+            'js': 'js',
+            'javascript': 'js'
+        }
+        extension = extension_map.get(language.code.lower(), language.code)
+        filename = f"solution.{extension}"
         
         data = {
             'problem': problem.domjudge_problem_id,
             'language': language.code,
-            'entry_point': 'main',  # hoặc tùy language
+            'team_id': team_id if team_id else 'exteam'
         }
         
         files = {
-            'code[]': ('solution.' + language.code, source_code.encode('utf-8'))
+            'code[]': (filename, source_code.encode('utf-8'), 'text/plain')
         }
         
         response = requests.post(
@@ -189,8 +206,8 @@ timelimit: {problem.time_limit_ms / 1000}
             auth=(self.username, self.password)
         )
         
-        if response.status_code == 200:
-            return response.json()['id']
+        if response.status_code in [200, 201]:
+            return response.json()
         else:
             raise Exception(f"Submit failed: {response.status_code} - {response.text}")
     
@@ -207,3 +224,46 @@ timelimit: {problem.time_limit_ms / 1000}
             return response.json()
         else:
             raise Exception(f"Get result failed: {response.status_code}")
+    
+    def get_judgement(self, submission_id, contest_id=None):
+        """
+        Lấy judgement (kết quả chấm) từ DOMjudge
+        Returns: judgement data with judgement_type_id (AC, WA, TLE, etc.)
+        """
+        if contest_id:
+            url = f"{self.api_url}/contests/{contest_id}/judgements/{submission_id}"
+        else:
+            url = f"{self.api_url}/judgements/{submission_id}"
+        
+        response = requests.get(
+            url,
+            auth=(self.username, self.password)
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            # Nếu chưa có judgement, trả về None
+            return None
+    
+    def get_submissions_by_problem(self, problem_id, contest_id=None):
+        """
+        Lấy danh sách submissions theo problem từ DOMjudge
+        """
+        if contest_id:
+            url = f"{self.api_url}/contests/{contest_id}/submissions"
+        else:
+            url = f"{self.api_url}/submissions"
+        
+        params = {'problem_id': problem_id}
+        
+        response = requests.get(
+            url,
+            params=params,
+            auth=(self.username, self.password)
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            raise Exception(f"Get submissions failed: {response.status_code}")
