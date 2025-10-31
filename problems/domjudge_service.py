@@ -4,7 +4,27 @@ from io import BytesIO
 from django.conf import settings
 from django.core.files.base import ContentFile
 from course.models import File
+from django.db import connections
 
+def execute_raw_query(db_alias, query, params=None, fetch=False):
+    """
+    Hàm thực thi query SQL thuần trên database được chọn.
+
+    Args:
+        db_alias (str): Tên database trong settings.py (vd: 'domjudge' hoặc 'default')
+        query (str): Câu SQL (có thể chứa %s)
+        params (list | tuple): Tham số truyền vào query (optional)
+        fetch (bool): Nếu True → trả về kết quả SELECT
+
+    Returns:
+        list[tuple] | None: danh sách kết quả nếu fetch=True, ngược lại None
+    """
+    with connections[db_alias].cursor() as cursor:
+        cursor.execute(query, params or [])
+        if fetch:
+            columns = [col[0] for col in cursor.description] if cursor.description else []
+            results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+            return results
 
 class DOMjudgeService:
     def __init__(self):
@@ -26,12 +46,44 @@ class DOMjudgeService:
             
             # 3. Upload lên DOMjudge
             domjudge_problem_id = self._upload_to_domjudge(problem, zip_file)
+
+            # 4. Cập nhật lại problem languages
+            self._sync_problem_languages(domjudge_problem_id, [lang.code for lang in problem.allowed_languages.all()])
             
             return domjudge_problem_id
         
         except Exception as e:
             raise Exception(f"DOMjudge sync failed: {str(e)}")
-    
+
+    def _sync_problem_languages(self, external_id, language_codes):
+        # Lấy probid thật trong DOMjudge từ externalid
+        result = execute_raw_query(
+            'domjudge',
+            "SELECT probid FROM problem WHERE externalid = %s",
+            [external_id],
+            fetch=True
+        )
+        if not result:
+            raise Exception(f"Problem with externalid '{external_id}' not found in DOMjudge database.")
+        
+        probid = result[0]['probid']
+
+        # Xóa cũ
+        execute_raw_query(
+            'domjudge',
+            "DELETE FROM problemlanguage WHERE probid = %s",
+            [probid]
+        )
+
+        # Thêm mới
+        for lang in language_codes:
+            execute_raw_query(
+                'domjudge',
+                "INSERT INTO problemlanguage (probid, langid) VALUES (%s, %s)",
+                [probid, lang]
+            )
+
+
     def _create_test_case_files(self, problem):
         """Tạo input/output files từ text cho mỗi test case"""
         for test_case in problem.test_cases.all():
