@@ -224,3 +224,46 @@ timelimit: {problem.time_limit_ms / 1000}
             return response.json()
         else:
             raise Exception(f"Get result failed: {response.status_code}")
+    
+    def get_judgement(self, submission_id, contest_id=None):
+        """
+        Lấy judgement (kết quả chấm) từ DOMjudge
+        Returns: judgement data with judgement_type_id (AC, WA, TLE, etc.)
+        """
+        if contest_id:
+            url = f"{self.api_url}/contests/{contest_id}/judgements/{submission_id}"
+        else:
+            url = f"{self.api_url}/judgements/{submission_id}"
+        
+        response = requests.get(
+            url,
+            auth=(self.username, self.password)
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            # Nếu chưa có judgement, trả về None
+            return None
+    
+    def get_submissions_by_problem(self, problem_id, contest_id=None):
+        """
+        Lấy danh sách submissions theo problem từ DOMjudge
+        """
+        if contest_id:
+            url = f"{self.api_url}/contests/{contest_id}/submissions"
+        else:
+            url = f"{self.api_url}/submissions"
+        
+        params = {'problem_id': problem_id}
+        
+        response = requests.get(
+            url,
+            params=params,
+            auth=(self.username, self.password)
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            raise Exception(f"Get submissions failed: {response.status_code}")

@@ -439,6 +439,11 @@ class SubmissionListView(APIView):
         if not request.user.is_staff:
             submissions = submissions.filter(user=request.user)
         
+        # Sync status from DOMjudge cho các submission đang judging
+        sync_from_domjudge = request.query_params.get('sync', 'true').lower() == 'true'
+        if sync_from_domjudge:
+            self._sync_submissions_status(submissions)
+        
         # Ordering
         ordering = request.query_params.get('ordering', '-submitted_at')
         submissions = submissions.order_by(ordering)
@@ -461,6 +466,39 @@ class SubmissionListView(APIView):
             "page_size": page_size,
             "total_pages": (total + page_size - 1) // page_size
         })
+    
+    def _sync_submissions_status(self, submissions):
+        """Sync status từ DOMjudge cho các submission đang judging"""
+        domjudge_service = DOMjudgeService()
+        contest_id = None  # Có thể lấy từ settings hoặc request params
+        
+        for submission in submissions.filter(status='judging'):
+            if submission.domjudge_submission_id:
+                try:
+                    # Lấy judgement từ DOMjudge
+                    judgement = domjudge_service.get_judgement(
+                        submission.domjudge_submission_id,
+                        contest_id=contest_id
+                    )
+                    
+                    if judgement and judgement.get('valid'):
+                        # Cập nhật status từ judgement_type_id
+                        judgement_type = judgement.get('judgement_type_id', 'unknown')
+                        submission.status = judgement_type.lower()
+                        
+                        # Cập nhật score (nếu AC thì 100, không thì 0)
+                        if judgement_type == 'AC':
+                            submission.score = 100.00
+                        else:
+                            submission.score = 0.00
+                        
+                        # Cập nhật feedback
+                        submission.feedback = f"Max run time: {judgement.get('max_run_time', 0)}s"
+                        submission.save()
+                
+                except Exception as e:
+                    print(f"Failed to sync submission {submission.id}: {str(e)}")
+                    continue
 
 
 class SubmissionDetailView(APIView):
@@ -486,14 +524,34 @@ class SubmissionDetailView(APIView):
         if submission.status == "judging" and submission.domjudge_submission_id:
             try:
                 domjudge_service = DOMjudgeService()
-                result = domjudge_service.get_submission_result(submission.domjudge_submission_id)
+                contest_id = request.query_params.get('contest_id')
                 
-                # Cập nhật status và feedback
-                # Tùy vào response của DOMjudge
-                if 'judgement_type_id' in result:
-                    submission.status = result.get('judgement_type_id', 'unknown')
+                # Lấy judgement từ DOMjudge
+                judgement = domjudge_service.get_judgement(
+                    submission.domjudge_submission_id,
+                    contest_id=contest_id
+                )
                 
-                submission.save()
+                if judgement and judgement.get('valid'):
+                    # Cập nhật status từ judgement_type_id
+                    judgement_type = judgement.get('judgement_type_id', 'unknown')
+                    submission.status = judgement_type.lower()
+                    
+                    # Cập nhật score
+                    if judgement_type == 'AC':
+                        submission.score = 100.00
+                    else:
+                        submission.score = 0.00
+                    
+                    # Cập nhật feedback với chi tiết từ judgement
+                    feedback_parts = [
+                        f"Judgement: {judgement_type}",
+                        f"Max run time: {judgement.get('max_run_time', 0)}s",
+                        f"Start time: {judgement.get('start_contest_time', 'N/A')}",
+                        f"End time: {judgement.get('end_contest_time', 'N/A')}"
+                    ]
+                    submission.feedback = "\n".join(feedback_parts)
+                    submission.save()
             
             except Exception as e:
                 print(f"Failed to sync submission result: {str(e)}")
