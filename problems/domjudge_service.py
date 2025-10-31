@@ -1,6 +1,7 @@
 import requests
 import zipfile
 from io import BytesIO
+import re
 from django.conf import settings
 from django.core.files.base import ContentFile
 from course.models import File
@@ -43,7 +44,7 @@ class DOMjudgeService:
             
             # 2. Tạo ZIP package
             zip_file = self._create_problem_package(problem)
-            
+
             # 3. Upload lên DOMjudge
             domjudge_problem_id = self._upload_to_domjudge(problem, zip_file)
 
@@ -229,21 +230,17 @@ timelimit: {problem.time_limit_ms / 1000}
             url = f"{self.api_url}/submissions"
         
         # Xác định extension dựa trên language code
-        extension_map = {
-            'c': 'c',
-            'cpp': 'cpp',
-            'java': 'java',
-            'py': 'py',
-            'python3': 'py',
-            'js': 'js',
-            'javascript': 'js'
-        }
-        extension = extension_map.get(language.code.lower(), language.code)
+
+        extension = language.extension or 'txt'
         filename = f"solution.{extension}"
-        
+        if extension.lower() == 'java':
+            match = re.search(r'public\s+class\s+(\w+)', source_code)
+            class_name = match.group(1) if match else 'Solution'
+            filename = f"{class_name}.java"
+
         data = {
             'problem': problem.domjudge_problem_id,
-            'language': language.code,
+            'language': language.externalid or language.code,
             'team_id': team_id if team_id else 'exteam'
         }
         
@@ -319,3 +316,142 @@ timelimit: {problem.time_limit_ms / 1000}
             return response.json()
         else:
             raise Exception(f"Get submissions failed: {response.status_code}")
+    
+    def get_detailed_judging_results(self, domjudge_submission_id):
+        """
+        Lấy chi tiết kết quả judging từ DOMjudge database
+        Bao gồm: verdict, test case results, compile output, error messages
+        
+        Returns: {
+            'verdict': 'AC' | 'WA' | 'TLE' | 'MLE' | 'RE' | 'CE',
+            'compile_output': '...',
+            'test_cases': [
+                {
+                    'test_number': 1,
+                    'verdict': 'AC',
+                    'runtime': 0.02,
+                    'output': '...',
+                    'error': '...'
+                },
+                ...
+            ]
+        }
+        """
+        try:
+            # 1. Lấy judging ID từ submission ID
+            judging_query = """
+                SELECT 
+                    j.judgingid,
+                    j.result as verdict,
+                    j.output_compile
+                FROM judging j
+                WHERE j.submitid = %s 
+                    AND j.valid = 1
+                ORDER BY j.judgingid DESC
+                LIMIT 1
+            """
+            
+            judging_result = execute_raw_query(
+                'domjudge', 
+                judging_query, 
+                [domjudge_submission_id], 
+                fetch=True
+            )
+            
+            if not judging_result:
+                return {
+                    'verdict': 'pending',
+                    'message': 'Chưa có kết quả chấm'
+                }
+            
+            judging_data = judging_result[0]
+            judgingid = judging_data['judgingid']
+            verdict = judging_data['verdict']
+            
+            # 2. Lấy compile output nếu có
+            compile_output = ''
+            if judging_data['output_compile']:
+                try:
+                    compile_output = judging_data['output_compile'].decode('utf-8')
+                except:
+                    compile_output = str(judging_data['output_compile'])
+            
+            # 3. Lấy chi tiết test case results
+            runs_query = """
+                SELECT 
+                    jr.runid,
+                    jr.runresult as verdict,
+                    jr.runtime,
+                    tc.probid,
+                    tc.testcaseid,
+                    tc.md5sum_input,
+                    tc.md5sum_output,
+                    tc.description as test_description
+                FROM judging_run jr
+                JOIN testcase tc ON jr.testcaseid = tc.testcaseid
+                WHERE jr.judgingid = %s
+                    AND jr.endtime IS NOT NULL
+                ORDER BY jr.runid
+            """
+            
+            runs_result = execute_raw_query(
+                'domjudge',
+                runs_query,
+                [judgingid],
+                fetch=True
+            )
+            
+            test_cases = []
+            for idx, run in enumerate(runs_result, start=1):
+                # Lấy output chi tiết của run này
+                output_query = """
+                    SELECT 
+                        jro.output_run,
+                        jro.output_error,
+                        jro.output_diff,
+                        jro.output_system
+                    FROM judging_run_output jro
+                    WHERE jro.runid = %s
+                    LIMIT 1
+                """
+                
+                output_result = execute_raw_query(
+                    'domjudge',
+                    output_query,
+                    [run['runid']],
+                    fetch=True
+                )
+                
+                output_data = output_result[0] if output_result else {}
+                
+                # Decode blob data
+                def decode_blob(blob_data):
+                    if not blob_data:
+                        return ''
+                    try:
+                        return blob_data.decode('utf-8')
+                    except:
+                        return str(blob_data)
+                
+                test_cases.append({
+                    'test_number': idx,  # Use enumeration index as test number
+                    'verdict': run['verdict'] or 'pending',
+                    'runtime': float(run['runtime']) if run['runtime'] else 0,
+                    'description': run['test_description'],
+                    'output': decode_blob(output_data.get('output_run')),
+                    'error': decode_blob(output_data.get('output_error')),
+                    'diff': decode_blob(output_data.get('output_diff')),
+                    'system': decode_blob(output_data.get('output_system'))
+                })
+            
+            return {
+                'verdict': verdict,
+                'compile_output': compile_output,
+                'test_cases': test_cases
+            }
+            
+        except Exception as e:
+            return {
+                'verdict': 'error',
+                'message': f'Error getting detailed results: {str(e)}'
+            }

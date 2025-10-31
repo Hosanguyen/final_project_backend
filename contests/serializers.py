@@ -5,13 +5,14 @@ from users.models import User
 
 
 class ContestProblemSerializer(serializers.ModelSerializer):
-    problem_id = serializers.IntegerField(write_only=True)
+    problem_id = serializers.IntegerField(source='problem.id', read_only=True)
     problem_title = serializers.CharField(source='problem.title', read_only=True)
     problem_slug = serializers.CharField(source='problem.slug', read_only=True)
     
     class Meta:
         model = ContestProblem
-        fields = ['id', 'problem_id', 'problem_title', 'problem_slug', 'sequence', 'alias']
+        fields = ['id', 'problem_id', 'problem_title', 'problem_slug', 'sequence', 
+                  'alias', 'label', 'color', 'rgb', 'point', 'lazy_eval_results']
         
 
 class ContestCreateSerializer(serializers.ModelSerializer):
@@ -114,3 +115,22 @@ class ContestListSerializer(serializers.ModelSerializer):
             return 'finished'
         else:
             return 'running'
+
+
+class AddProblemToContestSerializer(serializers.Serializer):
+    """Serializer for adding a problem to a contest"""
+    problem_id = serializers.IntegerField(required=True)
+    label = serializers.CharField(required=True, max_length=10)
+    color = serializers.CharField(required=False, allow_blank=True, max_length=50)
+    rgb = serializers.CharField(required=False, allow_blank=True, max_length=7)
+    points = serializers.IntegerField(required=False, default=1)
+    lazy_eval_results = serializers.BooleanField(required=False, default=False)
+    sequence = serializers.IntegerField(required=False)
+    
+    def validate_problem_id(self, value):
+        """Validate that problem exists"""
+        try:
+            Problem.objects.get(id=value)
+        except Problem.DoesNotExist:
+            raise serializers.ValidationError("Problem does not exist.")
+        return value

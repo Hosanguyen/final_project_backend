@@ -28,6 +28,11 @@ class ContestProblem(models.Model):
     problem = models.ForeignKey('problems.Problem', on_delete=models.CASCADE, related_name="contest_problems")
     sequence = models.IntegerField(default=0, help_text="Order of the problem in the contest")
     alias = models.CharField(max_length=10, help_text="Short alias for the problem in the contest context")
+    label = models.CharField(max_length=50, null=True, blank=True, help_text="Optional label for the problem")
+    color = models.CharField(max_length=20, null=True, blank=True, help_text="Optional color for the problem label")
+    rgb = models.CharField(max_length=7, null=True, blank=True, help_text="Optional RGB color code for the problem label")
+    point = models.IntegerField(default=100, help_text="Point value of the problem in the contest")
+    lazy_eval_results = models.BooleanField(default=False, help_text="Whether to lazily evaluate results for this problem")
 
     class Meta:
         db_table = "contest_problems"

@@ -157,3 +157,66 @@ class DOMjudgeContestService:
                 
         except requests.exceptions.RequestException as e:
             raise Exception(f"Failed to list contests from DOMjudge: {str(e)}")
+    
+    def add_problem_to_contest(self, contest_id, problem_id, problem_data):
+        """
+        Add a problem to a contest in DOMjudge
+        
+        Args:
+            contest_id: string - contest slug/id
+            problem_id: string - problem slug/id
+            problem_data: dict containing:
+                - label: string (required) - problem label (A, B, C, etc.)
+                - color: string (optional) - color name
+                - rgb: string (optional) - RGB color code
+                - points: int (optional) - points for the problem
+                - lazy_eval_results: int (optional) - 0 or 1
+        
+        Returns:
+            dict - DOMjudge response with problem details
+        """
+        url = f"{self.api_url}/contests/{contest_id}/problems/{problem_id}"
+        
+        try:
+            response = requests.put(
+                url,
+                json=problem_data,
+                auth=HTTPBasicAuth(self.username, self.password),
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                raise Exception(f"Failed to add problem to contest: {response.text}")
+                
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"Failed to add problem to contest in DOMjudge: {str(e)}")
+    
+    def remove_problem_from_contest(self, contest_id, problem_id):
+        """
+        Remove a problem from a contest in DOMjudge
+        
+        Args:
+            contest_id: string - contest slug/id
+            problem_id: string - problem slug/id
+        
+        Returns:
+            bool - True if successful
+        """
+        url = f"{self.api_url}/contests/{contest_id}/problems/{problem_id}"
+        
+        try:
+            response = requests.delete(
+                url,
+                auth=HTTPBasicAuth(self.username, self.password),
+                timeout=30
+            )
+            
+            if response.status_code in [200, 204]:
+                return True
+            else:
+                raise Exception(f"Failed to remove problem from contest: {response.text}")
+                
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"Failed to remove problem from contest in DOMjudge: {str(e)}")

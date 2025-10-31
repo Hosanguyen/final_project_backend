@@ -556,5 +556,6 @@ class SubmissionDetailView(APIView):
             except Exception as e:
                 print(f"Failed to sync submission result: {str(e)}")
         
-        serializer = SubmissionSerializer(submission)
+        from .serializers import SubmissionDetailSerializer
+        serializer = SubmissionDetailSerializer(submission)
         return Response(serializer.data)

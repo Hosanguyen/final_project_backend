@@ -307,10 +307,46 @@ class SubmissionSerializer(serializers.ModelSerializer):
 class SubmissionListSerializer(serializers.ModelSerializer):
     """Submission list (simplified)"""
     language = LanguageSimpleSerializer(read_only=True)
+    user = UserListSerializer(read_only=True)
     
     class Meta:
         model = Submissions
         fields = [
-            "id", "language", "submitted_at",
+            "id", "user", "language", "submitted_at",
             "status", "score"
         ]
+
+
+class SubmissionDetailSerializer(serializers.ModelSerializer):
+    """Submission detail with judging results"""
+    problem = ProblemListSerializer(read_only=True)
+    user = UserListSerializer(read_only=True)
+    language = LanguageSimpleSerializer(read_only=True)
+    detailed_results = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Submissions
+        fields = [
+            "id", "problem", "user", "language",
+            "code_text", "submitted_at", "status",
+            "score", "feedback", "domjudge_submission_id",
+            "detailed_results"
+        ]
+        read_only_fields = ["id", "submitted_at"]
+    
+    def get_detailed_results(self, obj):
+        """Get detailed judging results from DOMjudge database"""
+        if not obj.domjudge_submission_id:
+            return None
+        
+        from .domjudge_service import DOMjudgeService
+        service = DOMjudgeService()
+        
+        try:
+            results = service.get_detailed_judging_results(obj.domjudge_submission_id)
+            return results
+        except Exception as e:
+            return {
+                'verdict': 'error',
+                'message': str(e)
+            }

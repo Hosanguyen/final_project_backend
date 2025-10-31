@@ -21,6 +21,8 @@ class Language(models.Model):
     id = models.BigAutoField(primary_key=True)
     code = models.CharField(max_length=100, unique=True)
     name = models.CharField(max_length=100)
+    externalid = models.CharField(max_length=100, unique=True, null=True, blank=True, help_text="External ID for integration with DOMjudge")
+    extension = models.CharField(max_length=50, null=True, blank=True, help_text="File extension for this language (e.g., .py, .java, .cpp)")
     active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
