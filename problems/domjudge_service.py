@@ -1,6 +1,7 @@
 import requests
 import zipfile
 from io import BytesIO
+import re
 from django.conf import settings
 from django.core.files.base import ContentFile
 from course.models import File
@@ -43,7 +44,7 @@ class DOMjudgeService:
             
             # 2. Tạo ZIP package
             zip_file = self._create_problem_package(problem)
-            
+
             # 3. Upload lên DOMjudge
             domjudge_problem_id = self._upload_to_domjudge(problem, zip_file)
 
@@ -229,21 +230,17 @@ timelimit: {problem.time_limit_ms / 1000}
             url = f"{self.api_url}/submissions"
         
         # Xác định extension dựa trên language code
-        extension_map = {
-            'c': 'c',
-            'cpp': 'cpp',
-            'java': 'java',
-            'py': 'py',
-            'python3': 'py',
-            'js': 'js',
-            'javascript': 'js'
-        }
-        extension = extension_map.get(language.code.lower(), language.code)
+
+        extension = language.extension or 'txt'
         filename = f"solution.{extension}"
-        
+        if extension.lower() == 'java':
+            match = re.search(r'public\s+class\s+(\w+)', source_code)
+            class_name = match.group(1) if match else 'Solution'
+            filename = f"{class_name}.java"
+
         data = {
             'problem': problem.domjudge_problem_id,
-            'language': language.code,
+            'language': language.externalid or language.code,
             'team_id': team_id if team_id else 'exteam'
         }
         

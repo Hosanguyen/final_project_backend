@@ -307,10 +307,11 @@ class SubmissionSerializer(serializers.ModelSerializer):
 class SubmissionListSerializer(serializers.ModelSerializer):
     """Submission list (simplified)"""
     language = LanguageSimpleSerializer(read_only=True)
+    user = UserListSerializer(read_only=True)
     
     class Meta:
         model = Submissions
         fields = [
-            "id", "language", "submitted_at",
+            "id", "user", "language", "submitted_at",
             "status", "score"
         ]
