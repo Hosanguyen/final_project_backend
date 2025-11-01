@@ -8,11 +8,64 @@ class ContestProblemSerializer(serializers.ModelSerializer):
     problem_id = serializers.IntegerField(source='problem.id', read_only=True)
     problem_title = serializers.CharField(source='problem.title', read_only=True)
     problem_slug = serializers.CharField(source='problem.slug', read_only=True)
+    problem_difficulty = serializers.CharField(source='problem.difficulty', read_only=True)
+    user_status = serializers.SerializerMethodField()
     
     class Meta:
         model = ContestProblem
-        fields = ['id', 'problem_id', 'problem_title', 'problem_slug', 'sequence', 
-                  'alias', 'label', 'color', 'rgb', 'point', 'lazy_eval_results']
+        fields = ['id', 'problem_id', 'problem_title', 'problem_slug', 'problem_difficulty',
+                  'sequence', 'alias', 'label', 'color', 'rgb', 'point', 'lazy_eval_results',
+                  'user_status']
+    
+    def get_user_status(self, obj):
+        """Get user's submission status for this problem"""
+        request = self.context.get('request')
+        
+        if not request or not request.user.is_authenticated:
+            print(f"[DEBUG] Returning None - no authenticated user")
+            return None
+        
+        from problems.models import Submissions
+        
+        try:
+            # Get all submissions for this user and problem
+            submissions = Submissions.objects.filter(
+                user=request.user,
+                problem=obj.problem
+            ).order_by('-submitted_at')
+            
+            print(f"[DEBUG] Found {submissions.count()} submissions for user={request.user.id}, problem={obj.problem.id}")
+            
+            if not submissions.exists():
+                return None
+            
+            # Find best status (AC > WA > others)
+            has_ac = False
+            has_wa = False
+            total_count = submissions.count()
+            
+            for sub in submissions:
+                status = (sub.status or '').lower()
+                if status == 'ac' or status == 'correct':
+                    has_ac = True
+                    break
+                elif status == 'wa' or status == 'wrong-answer':
+                    has_wa = True
+            
+            result = None
+            if has_ac:
+                result = {'status': 'AC', 'count': total_count}
+            elif has_wa:
+                result = {'status': 'WA', 'count': total_count}
+            else:
+                result = {'status': 'ATTEMPTED', 'count': total_count}
+            
+            return result
+                
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return None
         
 
 class ContestCreateSerializer(serializers.ModelSerializer):
@@ -83,7 +136,12 @@ class ContestSerializer(serializers.ModelSerializer):
     
     def get_problems(self, obj):
         contest_problems = obj.contest_problems.all()
-        return ContestProblemSerializer(contest_problems, many=True).data
+        # Pass request context to ContestProblemSerializer
+        return ContestProblemSerializer(
+            contest_problems, 
+            many=True, 
+            context=self.context
+        ).data
     
     def get_problem_count(self, obj):
         return obj.contest_problems.count()

@@ -333,3 +333,67 @@ class ContestProblemView(APIView):
                 'error': 'Failed to remove problem from contest',
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class ContestDetailUserView(APIView):
+    """Get, update, or delete a specific contest"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            contest = Contest.objects.get(slug='practice')
+            
+            # Get pagination parameters
+            page = int(request.query_params.get('page', 1))
+            page_size = int(request.query_params.get('page_size', 20))
+            
+            # Validate pagination parameters
+            if page < 1:
+                page = 1
+            if page_size < 1 or page_size > 100:
+                page_size = 20
+            
+            # Get all contest problems
+            contest_problems = ContestProblem.objects.filter(contest=contest).order_by('sequence')
+            total_count = contest_problems.count()
+            
+            # Calculate pagination
+            start_index = (page - 1) * page_size
+            end_index = start_index + page_size
+            
+            # Get paginated problems
+            paginated_problems = contest_problems[start_index:end_index]
+            
+            # Serialize problems
+            from .serializers import ContestProblemSerializer
+            problems_serializer = ContestProblemSerializer(
+                paginated_problems, 
+                many=True, 
+                context={'request': request}
+            )
+            
+            # Calculate pagination info
+            total_pages = (total_count + page_size - 1) // page_size
+            
+            return Response({
+                'id': contest.id,
+                'slug': contest.slug,
+                'title': contest.title,
+                'description': contest.description,
+                'start_at': contest.start_at,
+                'end_at': contest.end_at,
+                'visibility': contest.visibility,
+                'problems': problems_serializer.data,
+                'pagination': {
+                    'current_page': page,
+                    'page_size': page_size,
+                    'total_items': total_count,
+                    'total_pages': total_pages,
+                    'has_next': page < total_pages,
+                    'has_previous': page > 1
+                }
+            }, status=status.HTTP_200_OK)
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Contest not found'
+            }, status=status.HTTP_404_NOT_FOUND)
