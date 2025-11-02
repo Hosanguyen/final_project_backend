@@ -87,7 +87,7 @@ class CourseView(APIView):
 
     def get(self, request):
         """Lấy danh sách courses với filter và search"""
-        courses = Course.objects.all()
+        courses = Course.objects.prefetch_related('languages', 'tags', 'lessons', 'enrollments')
         
         # Filter by published status
         is_published = request.query_params.get('is_published')
@@ -120,7 +120,7 @@ class CourseView(APIView):
         
         # Order by
         ordering = request.query_params.get('ordering', '-created_at')
-        courses = courses.order_by(ordering)
+        courses = courses.distinct().order_by(ordering)
         
         serializer = CourseSerializer(courses, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -147,9 +147,13 @@ class CourseDetailView(APIView):
 
     def get(self, request, pk):
         """Lấy chi tiết course"""
-        course = self.get_object(pk)
-        if not course:
+        try:
+            course = Course.objects.prefetch_related(
+                'languages', 'tags', 'lessons', 'enrollments'
+            ).get(pk=pk)
+        except Course.DoesNotExist:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        
         serializer = CourseSerializer(course)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -191,7 +195,7 @@ class LessonView(APIView):
 
     def get(self, request):
         """Lấy danh sách lessons"""
-        lessons = Lesson.objects.all()
+        lessons = Lesson.objects.select_related('course').prefetch_related('resources')
         
         # Filter by course
         course_id = request.query_params.get('course_id')
@@ -233,9 +237,11 @@ class LessonDetailView(APIView):
 
     def get(self, request, pk):
         """Lấy chi tiết lesson"""
-        lesson = self.get_object(pk)
-        if not lesson:
+        try:
+            lesson = Lesson.objects.select_related('course').prefetch_related('resources__file').get(pk=pk)
+        except Lesson.DoesNotExist:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        
         serializer = LessonSerializer(lesson)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -297,8 +303,16 @@ class LessonResourceView(APIView):
 
     def post(self, request):
         """Tạo lesson resource mới"""
+        # Debug logging
+        print("=== LessonResource POST Debug ===")
+        print(f"request.data: {request.data}")
+        print(f"request.FILES: {request.FILES}")
+        print(f"request.POST: {request.POST}")
+        print(f"Content-Type: {request.content_type}")
+        
         uploaded_file = request.FILES.get('file')
         if uploaded_file:
+            print(f"File found: {uploaded_file.name}")
             file_instance = File.objects.create(
                 storage_key=uploaded_file,
                 filename=uploaded_file.name,
@@ -306,14 +320,31 @@ class LessonResourceView(APIView):
                 size=uploaded_file.size,
                 is_public=True
             )
-            data = request.data.copy()
-            data['file'] = file_instance.id
+            print(f"File instance created with ID: {file_instance.id}")
+            
+            # Tạo dict mới thay vì copy request.data (vì không thể copy file object)
+            data = {
+                'lesson': request.data.get('lesson'),
+                'type': request.data.get('type'),
+                'title': request.data.get('title', ''),
+                'sequence': request.data.get('sequence', 0),
+                'file': file_instance.id
+            }
         else:
-            data = request.data
+            print("No file found in request")
+            data = {
+                'lesson': request.data.get('lesson'),
+                'type': request.data.get('type'),
+                'title': request.data.get('title', ''),
+                'content': request.data.get('content', ''),
+                'url': request.data.get('url', ''),
+                'sequence': request.data.get('sequence', 0)
+            }
 
         serializer = LessonResourceSerializer(data=data)
         if serializer.is_valid(raise_exception=True):
-            serializer.save()
+            resource = serializer.save()
+            print(f"LessonResource created with ID: {resource.id}, File ID: {resource.file_id}")
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -341,9 +372,56 @@ class LessonResourceDetailView(APIView):
         resource = self.get_object(pk)
         if not resource:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
-        serializer = LessonResourceSerializer(resource, data=request.data)
+        
+        # Debug logging
+        print("=== LessonResource PUT Debug ===")
+        print(f"Resource ID: {pk}")
+        print(f"request.FILES: {request.FILES}")
+        
+        # Xử lý file upload nếu có
+        uploaded_file = request.FILES.get('file')
+        if uploaded_file:
+            print(f"New file found: {uploaded_file.name}")
+            # Xóa file cũ nếu có
+            if resource.file:
+                old_file = resource.file
+                resource.file = None
+                resource.save()
+                old_file.delete()
+            
+            # Tạo file mới
+            file_instance = File.objects.create(
+                storage_key=uploaded_file,
+                filename=uploaded_file.name,
+                file_type=uploaded_file.content_type,
+                size=uploaded_file.size,
+                is_public=True
+            )
+            print(f"New file instance created with ID: {file_instance.id}")
+            
+            # Tạo dict mới thay vì copy request.data (vì không thể copy file object)
+            data = {
+                'lesson': request.data.get('lesson'),
+                'type': request.data.get('type'),
+                'title': request.data.get('title', ''),
+                'sequence': request.data.get('sequence', 0),
+                'file': file_instance.id
+            }
+        else:
+            print("No new file in request")
+            data = {
+                'lesson': request.data.get('lesson'),
+                'type': request.data.get('type'),
+                'title': request.data.get('title', ''),
+                'content': request.data.get('content', ''),
+                'url': request.data.get('url', ''),
+                'sequence': request.data.get('sequence', 0)
+            }
+        
+        serializer = LessonResourceSerializer(resource, data=data)
         if serializer.is_valid():
             serializer.save()
+            print(f"Resource updated successfully")
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

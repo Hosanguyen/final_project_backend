@@ -90,7 +90,7 @@ class Course(models.Model):
 
 class Lesson(models.Model):
     id = models.BigAutoField(primary_key=True)
-    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="lessons")
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="lessons", null=True, blank=True)
     title = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     sequence = models.IntegerField(default=0)
@@ -99,10 +99,12 @@ class Lesson(models.Model):
 
     class Meta:
         db_table = "lessons"
-        ordering = ["sequence"]
+        ordering = ["sequence", "created_at"]
 
     def __str__(self):
-        return f"{self.title} ({self.course.title})"
+        if self.course:
+            return f"{self.title} ({self.course.title})"
+        return self.title
 
 class LessonResource(models.Model):
     RESOURCE_TYPE_CHOICES = [

@@ -95,7 +95,7 @@ class LessonResourceSerializer(serializers.ModelSerializer):
 
 class LessonSerializer(serializers.ModelSerializer):
     resources = LessonResourceSerializer(many=True, read_only=True)
-    course_title = serializers.CharField(source='course.title', read_only=True)
+    course_title = serializers.SerializerMethodField()
     resources_count = serializers.SerializerMethodField()
     
     class Meta:
@@ -105,6 +105,9 @@ class LessonSerializer(serializers.ModelSerializer):
             'sequence', 'created_at', 'updated_at', 'resources', 'resources_count'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def get_course_title(self, obj):
+        return obj.course.title if obj.course else None
     
     def get_resources_count(self, obj):
         return obj.resources.count()
