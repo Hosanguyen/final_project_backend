@@ -311,3 +311,24 @@ class RoleWithUsersSerializer(serializers.ModelSerializer):
     
     def get_permission_count(self, obj):
         return obj.permissions.count()
+    
+class AssignRolesToUserSerializer(serializers.Serializer):
+    role_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=True
+    )
+    
+    def validate_role_ids(self, value):
+        if not value:
+            raise serializers.ValidationError("Danh sách role IDs không được rỗng")
+        existing_count = Role.objects.filter(id__in=value).count()
+        if existing_count != len(value):
+            raise serializers.ValidationError("Một số role ID không tồn tại")
+        return value
+
+
+class RemoveRolesFromUserSerializer(serializers.Serializer):
+    role_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=True
+    )
