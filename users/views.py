@@ -26,7 +26,10 @@ from .serializers import (
     RoleListSerializer,
     RoleCreateUpdateSerializer,
     AssignPermissionsToRoleSerializer,
-    RemovePermissionsFromRoleSerializer
+    RemovePermissionsFromRoleSerializer,
+    UserWithRolesSerializer,
+    AssignRolesToUserSerializer,
+    RemoveRolesFromUserSerializer,
 )
 from common.authentication import CustomJWTAuthentication
 
@@ -168,7 +171,7 @@ class LogoutView(APIView):
         
 class AdminCRUDUser(APIView):
     authentication_classes = [CustomJWTAuthentication]  
-    permission_classes = [IsAdminUser]
+    # permission_classes = [IsAdminUser]
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -178,9 +181,16 @@ class AdminCRUDUser(APIView):
             return Response({"user": serializer.data, "tokens": tokens}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
-    def get(self, request):
+    def get(self, request, id=None):
+        # Nếu có id thì trả về chi tiết user
+        if id:
+            user = get_object_or_404(User, id=id)
+            serializer = UserWithRolesSerializer(user)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        # Nếu không có id thì trả về danh sách
         users = User.objects.all()
-        serializer = UserListSerializer(users, many=True)
+        serializer = UserWithRolesSerializer(users, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     def put(self, request, id):
@@ -202,6 +212,77 @@ class AdminCRUDUser(APIView):
             {"detail": f"User '{username}' deleted successfully."},
             status=status.HTTP_200_OK
         )
+    
+class UserAssignRolesView(APIView):
+    """
+    POST: GÁN roles cho user (THAY THẾ toàn bộ roles cũ)
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, user_id):
+        """
+        Request body:
+        {
+            "role_ids": [1, 2, 3]
+        }
+        """
+        user = get_object_or_404(User, id=user_id)
+        serializer = AssignRolesToUserSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            role_ids = serializer.validated_data["role_ids"]
+            roles = Role.objects.filter(id__in=role_ids)
+            
+            # THAY THẾ toàn bộ roles (xóa cũ, gán mới)
+            user.roles.set(roles)
+            
+            # Trả về user với roles đầy đủ
+            response_serializer = UserWithRolesSerializer(user)
+            return Response(
+                {
+                    "detail": f"Assigned {len(roles)} role(s) to user '{user.username}'",
+                    "data": response_serializer.data
+                },
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserRemoveRolesView(APIView):
+    """
+    POST: XÓA roles khỏi user
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, user_id):
+        """
+        Request body:
+        {
+            "role_ids": [1, 2]
+        }
+        """
+        user = get_object_or_404(User, id=user_id)
+        serializer = RemoveRolesFromUserSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            role_ids = serializer.validated_data["role_ids"]
+            roles = Role.objects.filter(id__in=role_ids)
+            
+            # XÓA roles
+            user.roles.remove(*roles)
+            
+            # Trả về user với roles đầy đủ
+            response_serializer = UserWithRolesSerializer(user)
+            return Response(
+                {
+                    "detail": f"Removed {len(roles)} role(s) from user '{user.username}'",
+                    "data": response_serializer.data
+                },
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class UserProfileView(APIView):
     authentication_classes = [CustomJWTAuthentication]
