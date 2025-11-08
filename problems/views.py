@@ -448,6 +448,9 @@ class SubmissionListView(APIView):
         ordering = request.query_params.get('ordering', '-submitted_at')
         submissions = submissions.order_by(ordering)
         
+        # Kiểm tra xem tất cả submissions đã hoàn thành judging chưa (trước khi pagination)
+        all_completed = not submissions.filter(status__in=['judging', 'pending']).exists()
+        
         # Pagination
         page = int(request.query_params.get('page', 1))
         page_size = int(request.query_params.get('page_size', 20))
@@ -455,16 +458,17 @@ class SubmissionListView(APIView):
         end = start + page_size
         
         total = submissions.count()
-        submissions = submissions[start:end]
+        submissions_page = submissions[start:end]
         
-        serializer = SubmissionListSerializer(submissions, many=True)
+        serializer = SubmissionListSerializer(submissions_page, many=True)
         
         return Response({
             "results": serializer.data,
             "total": total,
             "page": page,
             "page_size": page_size,
-            "total_pages": (total + page_size - 1) // page_size
+            "total_pages": (total + page_size - 1) // page_size,
+            "all_completed": all_completed  # Flag để frontend biết khi nào dừng polling
         })
     
     def _sync_submissions_status(self, submissions):
