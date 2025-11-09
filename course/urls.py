@@ -15,6 +15,7 @@ urlpatterns = [
     # Course URLs
     path("courses/", CourseView.as_view(), name="course-list-create"),
     path("courses/<int:pk>/", CourseDetailView.as_view(), name="course-detail"),
+    path("courses/slug/<slug:slug>/", CourseDetailView.as_view(), name="course-detail-by-slug"),
     
     # Lesson URLs
     path("lessons/", LessonView.as_view(), name="lesson-list-create"),
