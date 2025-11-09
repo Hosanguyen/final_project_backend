@@ -89,6 +89,11 @@ class CourseView(APIView):
         """Lấy danh sách courses với filter và search"""
         courses = Course.objects.prefetch_related('languages', 'tags', 'lessons', 'enrollments')
         
+        # Filter by slug
+        slug = request.query_params.get('slug')
+        if slug:
+            courses = courses.filter(slug=slug)
+        
         # Filter by published status
         is_published = request.query_params.get('is_published')
         if is_published is not None:
@@ -139,27 +144,38 @@ class CourseDetailView(APIView):
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
-    def get_object(self, pk):
+    def get_object(self, pk=None, slug=None):
         try:
-            return Course.objects.get(pk=pk)
+            if slug:
+                return Course.objects.get(slug=slug)
+            elif pk:
+                return Course.objects.get(pk=pk)
+            return None
         except Course.DoesNotExist:
             return None
 
-    def get(self, request, pk):
-        """Lấy chi tiết course"""
+    def get(self, request, pk=None, slug=None):
+        """Lấy chi tiết course theo ID hoặc slug"""
         try:
-            course = Course.objects.prefetch_related(
-                'languages', 'tags', 'lessons', 'enrollments'
-            ).get(pk=pk)
+            if slug:
+                course = Course.objects.prefetch_related(
+                    'languages', 'tags', 'lessons', 'enrollments'
+                ).get(slug=slug)
+            elif pk:
+                course = Course.objects.prefetch_related(
+                    'languages', 'tags', 'lessons', 'enrollments'
+                ).get(pk=pk)
+            else:
+                return Response({"detail": "ID or slug required"}, status=status.HTTP_400_BAD_REQUEST)
         except Course.DoesNotExist:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         
         serializer = CourseSerializer(course)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    def put(self, request, pk):
+    def put(self, request, pk=None, slug=None):
         """Cập nhật course"""
-        course = self.get_object(pk)
+        course = self.get_object(pk=pk, slug=slug)
         if not course:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         serializer = CourseSerializer(course, data=request.data)
@@ -168,9 +184,9 @@ class CourseDetailView(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def patch(self, request, pk):
+    def patch(self, request, pk=None, slug=None):
         """Cập nhật một phần course"""
-        course = self.get_object(pk)
+        course = self.get_object(pk=pk, slug=slug)
         if not course:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         serializer = CourseSerializer(course, data=request.data, partial=True)
@@ -197,8 +213,8 @@ class LessonView(APIView):
         """Lấy danh sách lessons"""
         lessons = Lesson.objects.select_related('course').prefetch_related('resources')
         
-        # Filter by course
-        course_id = request.query_params.get('course_id')
+        # Filter by course (support both course_id and course)
+        course_id = request.query_params.get('course_id') or request.query_params.get('course')
         if course_id:
             lessons = lessons.filter(course_id=course_id)
         
