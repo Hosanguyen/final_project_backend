@@ -133,7 +133,7 @@ class ProblemDetailSerializer(serializers.ModelSerializer):
 
 
 class ProblemCreateSerializer(serializers.ModelSerializer):
-    """Create problem with test cases"""
+    """Create problem with test cases (Manual hoặc ZIP mode)"""
     tag_ids = serializers.ListField(
         child=serializers.IntegerField(),
         write_only=True,
@@ -146,7 +146,37 @@ class ProblemCreateSerializer(serializers.ModelSerializer):
         required=False,
         allow_empty=True
     )
+    
+    # ============ MANUAL MODE ============
     test_cases = TestCaseCreateSerializer(many=True, write_only=True, required=False)
+    
+    # ============ ZIP MODE ============
+    test_cases_zip = serializers.FileField(
+        write_only=True, 
+        required=False,
+        help_text="ZIP file chứa test cases (.in/.out)"
+    )
+    zip_auto_detect_type = serializers.BooleanField(
+        write_only=True,
+        default=True,
+        required=False,
+        help_text="Tự động detect type từ folder (sample/secret)"
+    )
+    zip_default_type = serializers.ChoiceField(
+        choices=['sample', 'secret'],
+        write_only=True,
+        default='secret',
+        required=False,
+        help_text="Type mặc định nếu không detect được"
+    )
+    zip_default_points = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        write_only=True,
+        default=10.0,
+        required=False,
+        help_text="Điểm mặc định cho mỗi test case"
+    )
     
     class Meta:
         model = Problem
@@ -155,7 +185,12 @@ class ProblemCreateSerializer(serializers.ModelSerializer):
             "input_format", "output_format", "difficulty",
             "time_limit_ms", "memory_limit_kb", "source", "is_public",
             "editorial_text", "editorial_file",
-            "tag_ids", "language_ids", "test_cases"
+            "tag_ids", "language_ids", 
+            # Manual mode
+            "test_cases",
+            # ZIP mode
+            "test_cases_zip", "zip_auto_detect_type", 
+            "zip_default_type", "zip_default_points"
         ]
     
     def validate_slug(self, value):
@@ -177,10 +212,49 @@ class ProblemCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("Một số language ID không tồn tại")
         return value
     
+    def validate_test_cases_zip(self, value):
+        """Validate ZIP file"""
+        if value:
+            if not value.name.endswith('.zip'):
+                raise serializers.ValidationError("File phải có định dạng .zip")
+            
+            # Validate size (max 50MB)
+            max_size = 50 * 1024 * 1024
+            if value.size > max_size:
+                raise serializers.ValidationError(f"File ZIP quá lớn. Tối đa 50MB")
+        
+        return value
+    
+    def validate(self, attrs):
+        """Validate: Phải có 1 trong 2 mode (manual hoặc zip)"""
+        test_cases = attrs.get('test_cases')
+        test_cases_zip = attrs.get('test_cases_zip')
+        
+        # Cả 2 đều không có
+        if not test_cases and not test_cases_zip:
+            raise serializers.ValidationError({
+                "test_cases": "Phải cung cấp test cases (manual hoặc ZIP)",
+                "attrs": attrs
+            })
+        
+        # Cả 2 đều có
+        if test_cases and test_cases_zip:
+            raise serializers.ValidationError({
+                "test_cases": "Chỉ được chọn 1 trong 2 mode: manual hoặc ZIP"
+            })
+        
+        return attrs
+    
     def create(self, validated_data):
         tag_ids = validated_data.pop("tag_ids", [])
         language_ids = validated_data.pop("language_ids", [])
-        test_cases_data = validated_data.pop("test_cases", [])
+        
+        # Extract test case data
+        test_cases_manual = validated_data.pop("test_cases", None)
+        test_cases_zip = validated_data.pop("test_cases_zip", None)
+        zip_auto_detect = validated_data.pop("zip_auto_detect_type", True)
+        zip_default_type = validated_data.pop("zip_default_type", "secret")
+        zip_default_points = validated_data.pop("zip_default_points", 10.0)
         
         # Create problem
         problem = Problem.objects.create(**validated_data)
@@ -195,9 +269,37 @@ class ProblemCreateSerializer(serializers.ModelSerializer):
             languages = Language.objects.filter(id__in=language_ids)
             problem.allowed_languages.set(languages)
         
-        # Create test cases
-        for tc_data in test_cases_data:
-            TestCase.objects.create(problem=problem, **tc_data)
+        # ============ CREATE TEST CASES ============
+        
+        # MODE 1: Manual
+        if test_cases_manual:
+            for tc_data in test_cases_manual:
+                TestCase.objects.create(problem=problem, **tc_data)
+        
+        # MODE 2: ZIP
+        elif test_cases_zip:
+            from .utils import TestCaseZipProcessor
+            
+            processor = TestCaseZipProcessor(test_cases_zip, problem)
+            result = processor.process(
+                auto_detect_type=zip_auto_detect,
+                default_type=zip_default_type,
+                default_points=zip_default_points
+            )
+            
+            # Nếu không tạo được test case nào, raise error
+            if result['created'] == 0:
+                problem.delete()  # Rollback
+                error_msg = "Không tạo được test case nào từ file ZIP"
+                if result['errors']:
+                    error_msg += f": {'; '.join(result['errors'])}"
+                raise serializers.ValidationError({
+                    "test_cases_zip": error_msg
+                })
+            
+            # Log errors nếu có (nhưng vẫn tạo problem thành công)
+            if result['errors']:
+                print(f"Warning: {result['skipped']} test cases skipped: {result['errors']}")
         
         return problem
 
@@ -215,6 +317,31 @@ class ProblemUpdateSerializer(serializers.ModelSerializer):
         required=False
     )
     
+    # THÊM: Cho phép update test cases bằng ZIP
+    test_cases_zip = serializers.FileField(
+        write_only=True, 
+        required=False,
+        help_text="ZIP file chứa test cases (sẽ XÓA test cases cũ và thay thế)"
+    )
+    zip_auto_detect_type = serializers.BooleanField(
+        write_only=True,
+        default=True,
+        required=False
+    )
+    zip_default_type = serializers.ChoiceField(
+        choices=['sample', 'secret'],
+        write_only=True,
+        default='secret',
+        required=False
+    )
+    zip_default_points = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        write_only=True,
+        default=10.0,
+        required=False
+    )
+    
     class Meta:
         model = Problem
         fields = [
@@ -222,7 +349,9 @@ class ProblemUpdateSerializer(serializers.ModelSerializer):
             "input_format", "output_format", "difficulty",
             "time_limit_ms", "memory_limit_kb", "source", "is_public",
             "editorial_text", "editorial_file",
-            "tag_ids", "language_ids"
+            "tag_ids", "language_ids",
+            "test_cases_zip", "zip_auto_detect_type",
+            "zip_default_type", "zip_default_points"
         ]
     
     def validate_tag_ids(self, value):
@@ -239,9 +368,26 @@ class ProblemUpdateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("Một số language ID không tồn tại")
         return value
     
+    def validate_test_cases_zip(self, value):
+        if value:
+            if not value.name.endswith('.zip'):
+                raise serializers.ValidationError("File phải có định dạng .zip")
+            
+            max_size = 50 * 1024 * 1024
+            if value.size > max_size:
+                raise serializers.ValidationError("File ZIP quá lớn. Tối đa 50MB")
+        
+        return value
+    
     def update(self, instance, validated_data):
         tag_ids = validated_data.pop("tag_ids", None)
         language_ids = validated_data.pop("language_ids", None)
+        
+        # Extract ZIP data
+        test_cases_zip = validated_data.pop("test_cases_zip", None)
+        zip_auto_detect = validated_data.pop("zip_auto_detect_type", True)
+        zip_default_type = validated_data.pop("zip_default_type", "secret")
+        zip_default_points = validated_data.pop("zip_default_points", 10.0)
         
         # Update problem fields
         for attr, value in validated_data.items():
@@ -257,6 +403,32 @@ class ProblemUpdateSerializer(serializers.ModelSerializer):
         if language_ids is not None:
             languages = Language.objects.filter(id__in=language_ids)
             instance.allowed_languages.set(languages)
+        
+        # Update test cases từ ZIP (XÓA cũ và THAY THẾ)
+        if test_cases_zip:
+            from .utils import TestCaseZipProcessor
+            
+            # XÓA tất cả test cases cũ
+            instance.test_cases.all().delete()
+            
+            # Tạo mới từ ZIP
+            processor = TestCaseZipProcessor(test_cases_zip, instance)
+            result = processor.process(
+                auto_detect_type=zip_auto_detect,
+                default_type=zip_default_type,
+                default_points=zip_default_points
+            )
+            
+            if result['created'] == 0:
+                error_msg = "Không tạo được test case nào từ file ZIP"
+                if result['errors']:
+                    error_msg += f": {'; '.join(result['errors'])}"
+                raise serializers.ValidationError({
+                    "test_cases_zip": error_msg
+                })
+            
+            if result['errors']:
+                print(f"Warning: {result['skipped']} test cases skipped: {result['errors']}")
         
         return instance
 

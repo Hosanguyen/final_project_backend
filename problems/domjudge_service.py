@@ -48,6 +48,7 @@ class DOMjudgeService:
             # 3. Upload lên DOMjudge
             domjudge_problem_id = self._upload_to_domjudge(problem, zip_file)
 
+
             # 4. Cập nhật lại problem languages
             self._sync_problem_languages(domjudge_problem_id, [lang.code for lang in problem.allowed_languages.all()])
             
