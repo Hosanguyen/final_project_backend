@@ -1,3 +1,4 @@
+import json
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -16,15 +17,20 @@ from .domjudge_service import DOMjudgeService
 from common.authentication import CustomJWTAuthentication
 
 
+
 class ProblemListCreateView(APIView):
     """
     GET: List all problems (with filters)
     POST: Create new problem + Auto sync to DOMjudge
+    Hỗ trợ 2 mode:
+    - Manual: Gửi test_cases array
+    - ZIP: Gửi test_cases_zip file
     """
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        # ... existing GET code - KHÔNG THAY ĐỔI ...
         problems = Problem.objects.all()
         
         # Filters
@@ -73,17 +79,50 @@ class ProblemListCreateView(APIView):
         })
     
     def post(self, request):
-        serializer = ProblemCreateSerializer(data=request.data)
+        data = request.data.dict()  # ← Chuyển QueryDict → dict thường
+        
+        # Parse test_cases từ JSON string
+        if 'test_cases' in data:
+            try:
+                test_cases_json = data.pop('test_cases')  # ← XÓA và LẤY GIÁ TRỊ
+                data['test_cases'] = json.loads(test_cases_json)  # ← THÊM LẠI đã parse
+            except json.JSONDecodeError as e:
+                return Response({
+                    'test_cases': f'Invalid JSON: {str(e)}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Parse tag_ids (có thể là multiple values)
+        if 'tag_ids' in request.data:
+            tag_ids = request.data.getlist('tag_ids')
+            if tag_ids:
+                data['tag_ids'] = [int(x) for x in tag_ids if x]
+        
+        # Parse language_ids (tương tự)
+        if 'language_ids' in request.data:
+            lang_ids = request.data.getlist('language_ids')
+            if lang_ids:
+                data['language_ids'] = [int(x) for x in lang_ids if x]
+        
+
+        # if 'test_cases' in data:
+        #     try:
+        #         data['test_cases'] = json.loads(request.data['test_cases'])
+        #     except json.JSONDecodeError:
+        #         return Response({'test_cases': 'Invalid JSON'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # return Response({"detail": request.data}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = ProblemCreateSerializer(data=data)
         
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
-        # Tạo problem
+        # Tạo problem (đã bao gồm test cases từ manual hoặc ZIP)
         problem = serializer.save(created_by=request.user)
         
-        # Auto sync to DOMjudge nếu có test cases
+        # Auto sync to DOMjudge
         sync_status = "not_synced"
         sync_message = ""
+        zip_process_result = None
         
         if problem.test_cases.exists():
             try:
@@ -118,36 +157,63 @@ class ProblemDetailView(APIView):
     """
     GET: Get problem detail
     PUT: Update problem + Auto re-sync to DOMjudge
+         Hỗ trợ update test cases bằng ZIP (sẽ XÓA cũ và THAY THẾ)
     DELETE: Delete problem + Delete from DOMjudge
     """
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
     
     def get(self, request, id):
+        # ... existing GET code - KHÔNG THAY ĐỔI ...
         problem = get_object_or_404(Problem, id=id)
         serializer = ProblemDetailSerializer(problem)
         return Response(serializer.data)
     
     def put(self, request, id):
         problem = get_object_or_404(Problem, id=id)
-        serializer = ProblemUpdateSerializer(problem, data=request.data, partial=True)
+        data = request.data.dict()  # ← Chuyển QueryDict → dict thường
         
+        # Parse test_cases từ JSON string
+        if 'test_cases' in data:
+            try:
+                test_cases_json = data.pop('test_cases')  # ← XÓA và LẤY GIÁ TRỊ
+                data['test_cases'] = json.loads(test_cases_json)  # ← THÊM LẠI đã parse
+            except json.JSONDecodeError as e:
+                return Response({
+                    'test_cases': f'Invalid JSON: {str(e)}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Parse tag_ids (có thể là multiple values)
+        if 'tag_ids' in request.data:
+            tag_ids = request.data.getlist('tag_ids')
+            if tag_ids:
+                data['tag_ids'] = [int(x) for x in tag_ids if x]
+        
+        # Parse language_ids (tương tự)
+        if 'language_ids' in request.data:
+            lang_ids = request.data.getlist('language_ids')
+            if lang_ids:
+                data['language_ids'] = [int(x) for x in lang_ids if x]
+        
+        serializer = ProblemUpdateSerializer(problem, data=data, partial=True)
+
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
-        # Update problem
+        # Update problem (bao gồm cả test cases từ ZIP nếu có)
         problem = serializer.save(updated_by=request.user)
         
-        # Auto re-sync to DOMjudge nếu đã sync trước đó
+        # Auto re-sync to DOMjudge
         sync_status = "not_synced"
         sync_message = ""
         
-        if problem.is_synced_to_domjudge and problem.test_cases.exists():
+        if problem.test_cases.exists():
             try:
                 domjudge_service = DOMjudgeService()
                 domjudge_problem_id = domjudge_service.sync_problem(problem)
                 
                 problem.domjudge_problem_id = domjudge_problem_id
+                problem.is_synced_to_domjudge = True
                 problem.last_synced_at = timezone.now()
                 problem.save()
                 
@@ -168,6 +234,7 @@ class ProblemDetailView(APIView):
         })
     
     def delete(self, request, id):
+        # ... existing DELETE code - KHÔNG THAY ĐỔI ...
         problem = get_object_or_404(Problem, id=id)
         
         # Xóa từ DOMjudge trước

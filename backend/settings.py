@@ -100,7 +100,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'domjudge',
         'USER': 'domjudge',
-        'PASSWORD': 'djpw',
+        'PASSWORD': 'MYSQL_PASSWORD',
         'HOST': 'localhost',
         'PORT': '13306',
     },
