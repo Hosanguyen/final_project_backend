@@ -3,10 +3,12 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 *.sqlite3
+migrations/
 
 # Virtualenv
 venv/
 .env/
+.env
 
 # Django stuff
 media/
