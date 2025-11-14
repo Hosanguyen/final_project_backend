@@ -81,6 +81,10 @@ class ContestCreateSerializer(serializers.ModelSerializer):
     
     def validate_slug(self, value):
         """Validate that slug is unique and follows naming convention"""
+        # Skip validation if updating (instance exists)
+        if self.instance and self.instance.slug == value:
+            return value
+            
         if Contest.objects.filter(slug=value).exists():
             raise serializers.ValidationError("Contest with this slug already exists.")
         if not value.replace('-', '').replace('_', '').isalnum():
@@ -89,7 +93,11 @@ class ContestCreateSerializer(serializers.ModelSerializer):
     
     def validate(self, data):
         """Validate start_at and end_at"""
-        if data['end_at'] <= data['start_at']:
+        # Get existing values if updating
+        start_at = data.get('start_at', getattr(self.instance, 'start_at', None) if self.instance else None)
+        end_at = data.get('end_at', getattr(self.instance, 'end_at', None) if self.instance else None)
+        
+        if start_at and end_at and end_at <= start_at:
             raise serializers.ValidationError("End time must be after start time.")
         return data
     
@@ -117,6 +125,22 @@ class ContestCreateSerializer(serializers.ModelSerializer):
                 pass  # Skip if problem doesn't exist
         
         return contest
+    
+    def update(self, instance, validated_data):
+        """Update contest - ignore problems field in update"""
+        # Remove problems from validated_data if present
+        validated_data.pop('problems', None)
+        
+        # Update contest fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        # Set updated_by if available
+        if 'request' in self.context:
+            instance.updated_by = self.context['request'].user
+        
+        instance.save()
+        return instance
 
 
 class ContestSerializer(serializers.ModelSerializer):
