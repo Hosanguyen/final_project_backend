@@ -21,6 +21,8 @@ from .views import (
     AllPermissionsForSelectionView,
     AllRolesForSelectionView,
     ModelListView,
+    UserAssignRolesView,
+    UserRemoveRolesView,
 )
 
 
@@ -34,6 +36,9 @@ urlpatterns = [
     path('admin/update/<int:id>/', AdminCRUDUser.as_view(), name='admin_update_user'),
     path('admin/delete/<int:id>/', AdminCRUDUser.as_view(), name='admin_delete_user'),
     path('admin/list/', AdminCRUDUser.as_view(), name='admin_list_user'),
+    path('admin/detail/<int:id>/', AdminCRUDUser.as_view(), name='admin_detail_user'),
+    path('admin/<int:user_id>/assign-roles/', UserAssignRolesView.as_view(), name='user-assign-roles'),
+    path('admin/<int:user_id>/remove-roles/', UserRemoveRolesView.as_view(), name='user-remove-roles'),
     path('profile/', UserProfileView.as_view(), name='user_profile'),
     path('profile/update/', UserProfileView.as_view(), name='user_profile_update'),
     path('profile/reset-password/', UserResetPasswordView.as_view(), name='user_reset_password'),

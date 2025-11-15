@@ -44,6 +44,9 @@ INSTALLED_APPS = [
     'corsheaders',
     'users',
     'course',
+    'problems',
+    'contests',
+    'common',
 ]
 
 MIDDLEWARE = [
@@ -92,7 +95,15 @@ DATABASES = {
         'OPTIONS': {
             'charset': 'utf8mb4',
         },
-    }
+    },
+    'domjudge': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'domjudge',
+        'USER': 'domjudge',
+        'PASSWORD': 'MYSQL_PASSWORD',
+        'HOST': 'localhost',
+        'PORT': '13306',
+    },
 }
 
 
@@ -179,7 +190,10 @@ CORS_ALLOW_METHODS = [
     "POST",
     "PUT",
 ]
+from dotenv import load_dotenv
 import os
+
+load_dotenv()
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
@@ -189,3 +203,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / "media"
+
+DOMJUDGE_API_URL = os.getenv('DOMJUDGE_API_URL', 'http://localhost:8080/api/v4')
+DOMJUDGE_USERNAME = os.getenv('DOMJUDGE_USERNAME', 'admin')
+DOMJUDGE_PASSWORD = os.getenv('DOMJUDGE_PASSWORD', '12345')

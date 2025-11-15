@@ -21,6 +21,8 @@ class Language(models.Model):
     id = models.BigAutoField(primary_key=True)
     code = models.CharField(max_length=100, unique=True)
     name = models.CharField(max_length=100)
+    externalid = models.CharField(max_length=100, unique=True, null=True, blank=True, help_text="External ID for integration with DOMjudge")
+    extension = models.CharField(max_length=50, null=True, blank=True, help_text="File extension for this language (e.g., .py, .java, .cpp)")
     active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -88,7 +90,7 @@ class Course(models.Model):
 
 class Lesson(models.Model):
     id = models.BigAutoField(primary_key=True)
-    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="lessons")
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="lessons", null=True, blank=True)
     title = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     sequence = models.IntegerField(default=0)
@@ -97,10 +99,12 @@ class Lesson(models.Model):
 
     class Meta:
         db_table = "lessons"
-        ordering = ["sequence"]
+        ordering = ["sequence", "created_at"]
 
     def __str__(self):
-        return f"{self.title} ({self.course.title})"
+        if self.course:
+            return f"{self.title} ({self.course.title})"
+        return self.title
 
 class LessonResource(models.Model):
     RESOURCE_TYPE_CHOICES = [
