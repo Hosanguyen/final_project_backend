@@ -451,3 +451,63 @@ class UserContestsView(APIView):
                 'error': 'Failed to fetch contests',
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class UserContestDetailView(APIView):
+    """Get contest details for user with problems sorted by label"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, contest_id):
+        try:
+            contest = Contest.objects.get(id=contest_id, visibility='public')
+            
+            # Calculate contest status
+            now = timezone.now()
+            if now < contest.start_at:
+                contest_status = 'upcoming'
+            elif now > contest.end_at:
+                contest_status = 'finished'
+            else:
+                contest_status = 'running'
+            
+            # Only show problems if contest has started
+            problems_data = []
+            if contest_status != 'upcoming':
+                # Get contest problems sorted by label
+                contest_problems = ContestProblem.objects.filter(
+                    contest=contest
+                ).select_related('problem').order_by('label')
+                
+                # Serialize problems with user status
+                from .serializers import ContestProblemSerializer
+                problems_serializer = ContestProblemSerializer(
+                    contest_problems,
+                    many=True,
+                    context={'request': request}
+                )
+                problems_data = problems_serializer.data
+            
+            return Response({
+                'id': contest.id,
+                'slug': contest.slug,
+                'title': contest.title,
+                'description': contest.description,
+                'start_at': contest.start_at,
+                'end_at': contest.end_at,
+                'penalty_time': contest.penalty_time,
+                'penalty_mode': contest.penalty_mode,
+                'status': contest_status,
+                'problem_count': ContestProblem.objects.filter(contest=contest).count(),
+                'problems': problems_data
+            }, status=status.HTTP_200_OK)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Contest not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Failed to fetch contest details',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
