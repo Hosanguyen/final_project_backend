@@ -426,6 +426,7 @@ class SubmissionCreateView(APIView):
         
         language_id = serializer.validated_data['language_id']
         code = serializer.validated_data['code']
+        contest_id = serializer.validated_data.get('contest_id')
         
         # Kiểm tra language có được phép không
         language = get_object_or_404(Language, id=language_id)
@@ -440,11 +441,18 @@ class SubmissionCreateView(APIView):
                 "error": "Problem chưa được đồng bộ với DOMjudge"
             }, status=status.HTTP_400_BAD_REQUEST)
         
+        # Lấy contest object nếu có
+        contest = None
+        if contest_id:
+            from contests.models import Contest
+            contest = get_object_or_404(Contest, id=contest_id)
+        
         # Tạo submission trong DB
         submission = Submissions.objects.create(
             problem=problem,
             user=request.user,
             language=language,
+            contest=contest,
             code_text=code,
             status="pending"
         )
@@ -452,7 +460,7 @@ class SubmissionCreateView(APIView):
         # Submit lên DOMjudge
         try:
             domjudge_service = DOMjudgeService()
-            contest_id = request.data.get('contest_id') or 'practice'  # Optional
+            contest_id = contest.slug or 'practice'  # Optional
             team_id = request.data.get('team_id') or 'exteam'  # Optional
             domjudge_response = domjudge_service.submit_code(
                 problem=problem,
@@ -496,11 +504,24 @@ class SubmissionListView(APIView):
     def get(self, request, problem_id=None):
         from .models import Submissions
         from .serializers import SubmissionListSerializer
+        from contests.models import Contest
         
         if problem_id:
             submissions = Submissions.objects.filter(problem_id=problem_id)
         else:
             submissions = Submissions.objects.all()
+        
+        # Filter by contest if provided
+
+        contest_id = request.query_params.get('contest_id')
+        if contest_id:
+            submissions = submissions.filter(contest_id=contest_id)
+        else:
+            # Nếu không truyền contest_id, lọc submissions có contest_id rỗng hoặc contest có slug là "practice"
+            practice_contests = Contest.objects.filter(slug='practice').values_list('id', flat=True)
+            submissions = submissions.filter(
+                Q(contest_id__isnull=True) | Q(contest_id__in=practice_contests)
+            )
         
         # Filter by user (chỉ xem submission của mình, trừ admin)
         if not request.user.is_staff:

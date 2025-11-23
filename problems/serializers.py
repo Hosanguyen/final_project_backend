@@ -453,10 +453,18 @@ class SubmissionCreateSerializer(serializers.Serializer):
     """Create submission"""
     language_id = serializers.IntegerField(required=True)
     code = serializers.CharField(required=True, allow_blank=False)
+    contest_id = serializers.IntegerField(required=False, allow_null=True)
     
     def validate_language_id(self, value):
         if not Language.objects.filter(id=value).exists():
             raise serializers.ValidationError("Language không tồn tại")
+        return value
+    
+    def validate_contest_id(self, value):
+        if value is not None:
+            from contests.models import Contest
+            if not Contest.objects.filter(id=value).exists():
+                raise serializers.ValidationError("Contest không tồn tại")
         return value
 
 
@@ -465,11 +473,13 @@ class SubmissionSerializer(serializers.ModelSerializer):
     problem = ProblemListSerializer(read_only=True)
     user = UserListSerializer(read_only=True)
     language = LanguageSimpleSerializer(read_only=True)
+    contest_id = serializers.IntegerField(source='contest.id', read_only=True, allow_null=True)
+    contest_title = serializers.CharField(source='contest.title', read_only=True, allow_null=True)
     
     class Meta:
         model = Submissions
         fields = [
-            "id", "problem", "user", "language",
+            "id", "problem", "user", "language", "contest_id", "contest_title",
             "code_text", "submitted_at", "status",
             "score", "feedback", "domjudge_submission_id"
         ]
@@ -480,12 +490,13 @@ class SubmissionListSerializer(serializers.ModelSerializer):
     """Submission list (simplified)"""
     language = LanguageSimpleSerializer(read_only=True)
     user = UserListSerializer(read_only=True)
+    contest_id = serializers.IntegerField(source='contest.id', read_only=True, allow_null=True)
     
     class Meta:
         model = Submissions
         fields = [
             "id", "user", "language", "submitted_at",
-            "status", "score"
+            "status", "score", "contest_id"
         ]
 
 
@@ -494,12 +505,14 @@ class SubmissionDetailSerializer(serializers.ModelSerializer):
     problem = ProblemListSerializer(read_only=True)
     user = UserListSerializer(read_only=True)
     language = LanguageSimpleSerializer(read_only=True)
+    contest_id = serializers.IntegerField(source='contest.id', read_only=True, allow_null=True)
+    contest_title = serializers.CharField(source='contest.title', read_only=True, allow_null=True)
     detailed_results = serializers.SerializerMethodField()
     
     class Meta:
         model = Submissions
         fields = [
-            "id", "problem", "user", "language",
+            "id", "problem", "user", "language", "contest_id", "contest_title",
             "code_text", "submitted_at", "status",
             "score", "feedback", "domjudge_submission_id",
             "detailed_results"

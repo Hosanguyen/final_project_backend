@@ -511,3 +511,30 @@ class UserContestDetailView(APIView):
                 'error': 'Failed to fetch contest details',
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestProblemDetailView(APIView):
+    """Get ContestProblem details by id"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, contest_problem_id):
+        try:
+            contest_problem = ContestProblem.objects.select_related(
+                'contest', 'problem'
+            ).get(id=contest_problem_id)
+            
+            from .serializers import ContestProblemDetailSerializer
+            serializer = ContestProblemDetailSerializer(contest_problem)
+            
+            return Response(serializer.data, status=status.HTTP_200_OK)
+            
+        except ContestProblem.DoesNotExist:
+            return Response({
+                'error': 'ContestProblem not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Failed to fetch ContestProblem details',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
