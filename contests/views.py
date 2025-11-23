@@ -397,3 +397,144 @@ class ContestDetailUserView(APIView):
             return Response({
                 'error': 'Contest not found'
             }, status=status.HTTP_404_NOT_FOUND)
+
+
+class UserContestsView(APIView):
+    """Get all contests excluding practice contest for user header"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            # Get all contests excluding practice
+            contests = Contest.objects.exclude(slug='practice').filter(visibility='public')
+            
+            now = timezone.now()
+            
+            # Categorize contests
+            upcoming = []
+            running = []
+            finished = []
+            
+            for contest in contests:
+                contest_data = {
+                    'id': contest.id,
+                    'slug': contest.slug,
+                    'title': contest.title,
+                    'start_at': contest.start_at,
+                    'end_at': contest.end_at,
+                }
+                
+                if contest.start_at > now:
+                    upcoming.append(contest_data)
+                elif contest.start_at <= now and contest.end_at >= now:
+                    running.append(contest_data)
+                else:
+                    finished.append(contest_data)
+            
+            # Sort each category
+            upcoming.sort(key=lambda x: x['start_at'])
+            running.sort(key=lambda x: x['start_at'])
+            finished.sort(key=lambda x: x['end_at'], reverse=True)
+            
+            # Limit finished contests to most recent 5
+            finished = finished[:5]
+            
+            return Response({
+                'upcoming': upcoming,
+                'running': running,
+                'finished': finished
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({
+                'error': 'Failed to fetch contests',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class UserContestDetailView(APIView):
+    """Get contest details for user with problems sorted by label"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, contest_id):
+        try:
+            contest = Contest.objects.get(id=contest_id, visibility='public')
+            
+            # Calculate contest status
+            now = timezone.now()
+            if now < contest.start_at:
+                contest_status = 'upcoming'
+            elif now > contest.end_at:
+                contest_status = 'finished'
+            else:
+                contest_status = 'running'
+            
+            # Only show problems if contest has started
+            problems_data = []
+            if contest_status != 'upcoming':
+                # Get contest problems sorted by label
+                contest_problems = ContestProblem.objects.filter(
+                    contest=contest
+                ).select_related('problem').order_by('label')
+                
+                # Serialize problems with user status
+                from .serializers import ContestProblemSerializer
+                problems_serializer = ContestProblemSerializer(
+                    contest_problems,
+                    many=True,
+                    context={'request': request}
+                )
+                problems_data = problems_serializer.data
+            
+            return Response({
+                'id': contest.id,
+                'slug': contest.slug,
+                'title': contest.title,
+                'description': contest.description,
+                'start_at': contest.start_at,
+                'end_at': contest.end_at,
+                'penalty_time': contest.penalty_time,
+                'penalty_mode': contest.penalty_mode,
+                'status': contest_status,
+                'problem_count': ContestProblem.objects.filter(contest=contest).count(),
+                'problems': problems_data
+            }, status=status.HTTP_200_OK)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Contest not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Failed to fetch contest details',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestProblemDetailView(APIView):
+    """Get ContestProblem details by id"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, contest_problem_id):
+        try:
+            contest_problem = ContestProblem.objects.select_related(
+                'contest', 'problem'
+            ).get(id=contest_problem_id)
+            
+            from .serializers import ContestProblemDetailSerializer
+            serializer = ContestProblemDetailSerializer(contest_problem)
+            
+            return Response(serializer.data, status=status.HTTP_200_OK)
+            
+        except ContestProblem.DoesNotExist:
+            return Response({
+                'error': 'ContestProblem not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Failed to fetch ContestProblem details',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

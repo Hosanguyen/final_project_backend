@@ -216,3 +216,47 @@ class AddProblemToContestSerializer(serializers.Serializer):
         except Problem.DoesNotExist:
             raise serializers.ValidationError("Problem does not exist.")
         return value
+
+
+class ContestProblemDetailSerializer(serializers.ModelSerializer):
+    """Detailed serializer for ContestProblem including full contest and problem data"""
+    contest = serializers.SerializerMethodField()
+    problem = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ContestProblem
+        fields = [
+            'id', 'contest', 'problem', 'sequence', 'alias', 
+            'label', 'color', 'rgb', 'point', 'lazy_eval_results'
+        ]
+    
+    def get_contest(self, obj):
+        """Return contest data"""
+        from django.utils import timezone
+        now = timezone.now()
+        
+        status = 'upcoming'
+        if now < obj.contest.start_at:
+            status = 'upcoming'
+        elif now > obj.contest.end_at:
+            status = 'finished'
+        else:
+            status = 'running'
+        
+        return {
+            'id': obj.contest.id,
+            'slug': obj.contest.slug,
+            'title': obj.contest.title,
+            'description': obj.contest.description,
+            'start_at': obj.contest.start_at,
+            'end_at': obj.contest.end_at,
+            'visibility': obj.contest.visibility,
+            'penalty_time': obj.contest.penalty_time,
+            'penalty_mode': obj.contest.penalty_mode,
+            'status': status
+        }
+    
+    def get_problem(self, obj):
+        """Return problem data"""
+        from problems.serializers import ProblemDetailSerializer
+        return ProblemDetailSerializer(obj.problem).data

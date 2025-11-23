@@ -150,6 +150,7 @@ class Submissions(models.Model):
     problem = models.ForeignKey(Problem, on_delete=models.CASCADE, related_name="submissions")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="submissions")
     language = models.ForeignKey(Language, on_delete=models.SET_NULL, null=True, related_name="submissions")
+    contest = models.ForeignKey('contests.Contest', on_delete=models.CASCADE, null=True, blank=True, related_name="submissions", help_text="Contest this submission belongs to (null for practice mode)")
     code_file = models.ForeignKey(File, on_delete=models.SET_NULL, null=True, related_name="submissions")
     code_text = models.TextField(null=True, blank=True)
     submitted_at = models.DateTimeField(auto_now_add=True)
