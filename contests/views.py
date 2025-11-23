@@ -397,3 +397,57 @@ class ContestDetailUserView(APIView):
             return Response({
                 'error': 'Contest not found'
             }, status=status.HTTP_404_NOT_FOUND)
+
+
+class UserContestsView(APIView):
+    """Get all contests excluding practice contest for user header"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            # Get all contests excluding practice
+            contests = Contest.objects.exclude(slug='practice').filter(visibility='public')
+            
+            now = timezone.now()
+            
+            # Categorize contests
+            upcoming = []
+            running = []
+            finished = []
+            
+            for contest in contests:
+                contest_data = {
+                    'id': contest.id,
+                    'slug': contest.slug,
+                    'title': contest.title,
+                    'start_at': contest.start_at,
+                    'end_at': contest.end_at,
+                }
+                
+                if contest.start_at > now:
+                    upcoming.append(contest_data)
+                elif contest.start_at <= now and contest.end_at >= now:
+                    running.append(contest_data)
+                else:
+                    finished.append(contest_data)
+            
+            # Sort each category
+            upcoming.sort(key=lambda x: x['start_at'])
+            running.sort(key=lambda x: x['start_at'])
+            finished.sort(key=lambda x: x['end_at'], reverse=True)
+            
+            # Limit finished contests to most recent 5
+            finished = finished[:5]
+            
+            return Response({
+                'upcoming': upcoming,
+                'running': running,
+                'finished': finished
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({
+                'error': 'Failed to fetch contests',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
