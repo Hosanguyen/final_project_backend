@@ -75,7 +75,7 @@ class ContestCreateSerializer(serializers.ModelSerializer):
         model = Contest
         fields = [
             'slug', 'title', 'description', 'start_at', 'end_at',
-            'visibility', 'penalty_time', 'penalty_mode', 
+            'visibility', 'contest_mode', 'is_show_result', 'penalty_time', 'penalty_mode', 
             'freeze_rankings_at', 'problems'
         ]
     
@@ -148,12 +148,13 @@ class ContestSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
     updated_by_name = serializers.CharField(source='updated_by.username', read_only=True)
     problem_count = serializers.SerializerMethodField()
+    is_show_result = serializers.SerializerMethodField()
     
     class Meta:
         model = Contest
         fields = [
             'id', 'slug', 'title', 'description', 'start_at', 'end_at',
-            'visibility', 'penalty_time', 'penalty_mode', 'freeze_rankings_at',
+            'visibility', 'contest_mode', 'is_show_result', 'penalty_time', 'penalty_mode', 'freeze_rankings_at',
             'created_at', 'updated_at', 'created_by_name', 'updated_by_name',
             'problems', 'problem_count'
         ]
@@ -169,18 +170,31 @@ class ContestSerializer(serializers.ModelSerializer):
     
     def get_problem_count(self, obj):
         return obj.contest_problems.count()
+    
+    def get_is_show_result(self, obj):
+        """Automatically determine is_show_result based on contest status"""
+        from django.utils import timezone
+        now = timezone.now()
+        
+        # If contest has ended, show results
+        if now > obj.end_at:
+            return True
+        # If contest is running or upcoming, hide results
+        else:
+            return False
 
 
 class ContestListSerializer(serializers.ModelSerializer):
     problem_count = serializers.SerializerMethodField()
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
     status = serializers.SerializerMethodField()
+    is_show_result = serializers.SerializerMethodField()
     
     class Meta:
         model = Contest
         fields = [
             'id', 'slug', 'title', 'start_at', 'end_at',
-            'visibility', 'penalty_time', 'problem_count',
+            'visibility', 'contest_mode', 'is_show_result', 'penalty_time', 'problem_count',
             'created_by_name', 'status', 'created_at'
         ]
     
@@ -197,6 +211,18 @@ class ContestListSerializer(serializers.ModelSerializer):
             return 'finished'
         else:
             return 'running'
+    
+    def get_is_show_result(self, obj):
+        """Automatically determine is_show_result based on contest status"""
+        from django.utils import timezone
+        now = timezone.now()
+        
+        # If contest has ended, show results
+        if now > obj.end_at:
+            return True
+        # If contest is running or upcoming, hide results
+        else:
+            return False
 
 
 class AddProblemToContestSerializer(serializers.Serializer):
@@ -243,6 +269,11 @@ class ContestProblemDetailSerializer(serializers.ModelSerializer):
         else:
             status = 'running'
         
+        # Determine is_show_result based on contest status
+        from django.utils import timezone
+        now = timezone.now()
+        is_show_result = True if now > obj.contest.end_at else False
+        
         return {
             'id': obj.contest.id,
             'slug': obj.contest.slug,
@@ -251,6 +282,8 @@ class ContestProblemDetailSerializer(serializers.ModelSerializer):
             'start_at': obj.contest.start_at,
             'end_at': obj.contest.end_at,
             'visibility': obj.contest.visibility,
+            'contest_mode': obj.contest.contest_mode,
+            'is_show_result': is_show_result,
             'penalty_time': obj.contest.penalty_time,
             'penalty_mode': obj.contest.penalty_mode,
             'status': status

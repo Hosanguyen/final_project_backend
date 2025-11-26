@@ -578,6 +578,22 @@ class SubmissionListView(APIView):
                         judgement_type = judgement.get('judgement_type_id', 'unknown')
                         submission.status = judgement_type.lower()
                         
+                        # Lấy chi tiết test cases để tính test_passed và test_total
+                        try:
+                            detailed_results = domjudge_service.get_detailed_judging_results(
+                                submission.domjudge_submission_id
+                            )
+                            
+                            if detailed_results and 'test_cases' in detailed_results:
+                                test_cases = detailed_results['test_cases']
+                                submission.test_total = len(test_cases)
+                                submission.test_passed = sum(
+                                    1 for tc in test_cases 
+                                    if tc.get('verdict', '').lower() == 'correct'
+                                )
+                        except Exception as e:
+                            print(f"Failed to get detailed results: {str(e)}")
+                        
                         # Cập nhật score (nếu AC thì 100, không thì 0)
                         if judgement_type == 'AC':
                             submission.score = 100.00
@@ -628,6 +644,22 @@ class SubmissionDetailView(APIView):
                     # Cập nhật status từ judgement_type_id
                     judgement_type = judgement.get('judgement_type_id', 'unknown')
                     submission.status = judgement_type.lower()
+                    
+                    # Lấy chi tiết test cases để tính test_passed và test_total
+                    try:
+                        detailed_results = domjudge_service.get_detailed_judging_results(
+                            submission.domjudge_submission_id
+                        )
+                        
+                        if detailed_results and 'test_cases' in detailed_results:
+                            test_cases = detailed_results['test_cases']
+                            submission.test_total = len(test_cases)
+                            submission.test_passed = sum(
+                                1 for tc in test_cases 
+                                if tc.get('verdict', '').lower() == 'correct'
+                            )
+                    except Exception as e:
+                        print(f"Failed to get detailed results: {str(e)}")
                     
                     # Cập nhật score
                     if judgement_type == 'AC':

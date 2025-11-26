@@ -156,6 +156,8 @@ class Submissions(models.Model):
     submitted_at = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=50, null=True, blank=True)
     score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    test_passed = models.IntegerField(null=True, blank=True, help_text="Number of test cases passed (for OI mode)")
+    test_total = models.IntegerField(null=True, blank=True, help_text="Total number of test cases (for OI mode)")
     feedback = models.TextField(null=True, blank=True)
     domjudge_submission_id = models.BigIntegerField(null=True, blank=True)
 
