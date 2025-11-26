@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Contest, ContestProblem
+from .models import Contest, ContestProblem, ContestParticipant
 from problems.models import Problem
 from users.models import User
 
@@ -293,3 +293,16 @@ class ContestProblemDetailSerializer(serializers.ModelSerializer):
         """Return problem data"""
         from problems.serializers import ProblemDetailSerializer
         return ProblemDetailSerializer(obj.problem).data
+
+
+class ContestParticipantSerializer(serializers.ModelSerializer):
+    """Serializer for ContestParticipant"""
+    user_id = serializers.IntegerField(source='user.id', read_only=True)
+    username = serializers.CharField(source='user.username', read_only=True)
+    contest_id = serializers.IntegerField(source='contest.id', read_only=True)
+    contest_title = serializers.CharField(source='contest.title', read_only=True)
+    
+    class Meta:
+        model = ContestParticipant
+        fields = ['id', 'user_id', 'username', 'contest_id', 'contest_title', 'registered_at', 'is_active']
+        read_only_fields = ['id', 'registered_at']

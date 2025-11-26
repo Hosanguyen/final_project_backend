@@ -45,3 +45,16 @@ class ContestProblem(models.Model):
         db_table = "contest_problems"
         unique_together = ("contest", "problem")
         ordering = ["sequence"]
+
+
+class ContestParticipant(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name="contest_participations")
+    contest = models.ForeignKey(Contest, on_delete=models.CASCADE, related_name="participants")
+    registered_at = models.DateTimeField(auto_now_add=True, help_text="Time when the participant registered for the contest")
+    is_active = models.BooleanField(default=True, help_text="Whether the participant is actively participating or has cancelled")
+
+    class Meta:
+        db_table = "contest_participants"
+        unique_together = ("contest", "user")
+        ordering = ["registered_at"]

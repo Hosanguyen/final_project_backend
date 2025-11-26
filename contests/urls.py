@@ -8,6 +8,10 @@ from .views import (
     UserContestsView,
     UserContestDetailView,
     ContestProblemDetailView,
+    ContestRegistrationView,
+    ContestRegistrationStatusView,
+    ContestParticipantsView,
+    ContestParticipantToggleView,
 )
 
 urlpatterns = [
@@ -20,4 +24,8 @@ urlpatterns = [
     path('user/contests/', UserContestsView.as_view(), name='user-contests'),
     path('user/<int:contest_id>/', UserContestDetailView.as_view(), name='user-contest-detail'),
     path('contest-problem/<int:contest_problem_id>/', ContestProblemDetailView.as_view(), name='contest-problem-detail'),
+    path('user/<int:contest_id>/register/', ContestRegistrationView.as_view(), name='contest-register'),
+    path('user/<int:contest_id>/registration-status/', ContestRegistrationStatusView.as_view(), name='contest-registration-status'),
+    path('<int:contest_id>/participants/', ContestParticipantsView.as_view(), name='contest-participants'),
+    path('<int:contest_id>/participants/<int:participant_id>/toggle/', ContestParticipantToggleView.as_view(), name='contest-participant-toggle'),
 ]
