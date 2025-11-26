@@ -18,7 +18,7 @@ class ContestProblemSerializer(serializers.ModelSerializer):
                   'user_status']
     
     def get_user_status(self, obj):
-        """Get user's submission status for this problem"""
+        """Get user's submission status for this problem in this contest"""
         request = self.context.get('request')
         
         if not request or not request.user.is_authenticated:
@@ -28,13 +28,14 @@ class ContestProblemSerializer(serializers.ModelSerializer):
         from problems.models import Submissions
         
         try:
-            # Get all submissions for this user and problem
+            # Get all submissions for this user, problem, and contest
             submissions = Submissions.objects.filter(
                 user=request.user,
-                problem=obj.problem
+                problem=obj.problem,
+                contest=obj.contest
             ).order_by('-submitted_at')
             
-            print(f"[DEBUG] Found {submissions.count()} submissions for user={request.user.id}, problem={obj.problem.id}")
+            print(f"[DEBUG] Found {submissions.count()} submissions for user={request.user.id}, problem={obj.problem.id}, contest={obj.contest.id}")
             
             if not submissions.exists():
                 return None
