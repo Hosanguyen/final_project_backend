@@ -173,6 +173,10 @@ class ContestSerializer(serializers.ModelSerializer):
     
     def get_is_show_result(self, obj):
         """Automatically determine is_show_result based on contest status"""
+        # Always show results for practice contest
+        if obj.slug == "practice":
+            return True
+            
         from django.utils import timezone
         now = timezone.now()
         
@@ -214,6 +218,10 @@ class ContestListSerializer(serializers.ModelSerializer):
     
     def get_is_show_result(self, obj):
         """Automatically determine is_show_result based on contest status"""
+        # Always show results for practice contest
+        if obj.slug == "practice":
+            return True
+            
         from django.utils import timezone
         now = timezone.now()
         
@@ -270,9 +278,11 @@ class ContestProblemDetailSerializer(serializers.ModelSerializer):
             status = 'running'
         
         # Determine is_show_result based on contest status
-        from django.utils import timezone
-        now = timezone.now()
-        is_show_result = True if now > obj.contest.end_at else False
+        # Always show results for practice contest
+        if obj.contest.slug == "practice":
+            is_show_result = True
+        else:
+            is_show_result = True if now > obj.contest.end_at else False
         
         return {
             'id': obj.contest.id,
