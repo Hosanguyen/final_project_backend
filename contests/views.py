@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from datetime import timedelta
 
-from .models import Contest, ContestProblem
+from .models import Contest, ContestProblem, ContestParticipant
 from .serializers import (
     ContestCreateSerializer,
     ContestSerializer,
@@ -461,6 +461,7 @@ class UserContestDetailView(APIView):
     def get(self, request, contest_id):
         try:
             contest = Contest.objects.get(id=contest_id, visibility='public')
+            user = request.user
             
             # Calculate contest status
             now = timezone.now()
@@ -471,9 +472,29 @@ class UserContestDetailView(APIView):
             else:
                 contest_status = 'running'
             
-            # Only show problems if contest has started
+            # Check if user is registered for the contest
+            is_registered = False
+            registered_at = None
+            try:
+                participant = ContestParticipant.objects.get(
+                    contest=contest,
+                    user=user,
+                    is_active=True
+                )
+                is_registered = True
+                registered_at = participant.registered_at
+            except ContestParticipant.DoesNotExist:
+                pass
+            
+            # Show problems logic:
+            # - If contest finished: everyone can view (registered or not)
+            # - If contest running: only registered users can view
+            # - If contest upcoming: no one can view
             problems_data = []
-            if contest_status != 'upcoming':
+            can_view_problems = False
+            
+            if contest_status == 'finished' or (is_registered and contest_status == 'running'):
+                can_view_problems = True
                 # Get contest problems sorted by label
                 contest_problems = ContestProblem.objects.filter(
                     contest=contest
@@ -499,6 +520,9 @@ class UserContestDetailView(APIView):
                 'penalty_mode': contest.penalty_mode,
                 'status': contest_status,
                 'problem_count': ContestProblem.objects.filter(contest=contest).count(),
+                'is_registered': is_registered,
+                'registered_at': registered_at,
+                'can_view_problems': can_view_problems,
                 'problems': problems_data
             }, status=status.HTTP_200_OK)
             
@@ -508,7 +532,237 @@ class UserContestDetailView(APIView):
             }, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({
-                'error': 'Failed to fetch contest details',
+                'error': 'Failed to fetch ContestProblem details',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestParticipantsView(APIView):
+    """Get list of participants for a contest"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, contest_id):
+        """Get all participants for a contest"""
+        try:
+            contest = Contest.objects.get(id=contest_id)
+            
+            # Get all participants (active and inactive)
+            participants = ContestParticipant.objects.filter(
+                contest=contest
+            ).select_related('user').order_by('-registered_at')
+            
+            # Serialize participants
+            from .serializers import ContestParticipantSerializer
+            serializer = ContestParticipantSerializer(participants, many=True)
+            
+            # Count statistics
+            total_count = participants.count()
+            active_count = participants.filter(is_active=True).count()
+            inactive_count = participants.filter(is_active=False).count()
+            
+            return Response({
+                'participants': serializer.data,
+                'statistics': {
+                    'total': total_count,
+                    'active': active_count,
+                    'inactive': inactive_count
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Cuộc thi không tồn tại'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Không thể tải danh sách người tham gia',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestParticipantToggleView(APIView):
+    """Toggle participant active status"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def patch(self, request, contest_id, participant_id):
+        """Deactivate active participant (Admin only can deactivate, not reactivate)"""
+        try:
+            contest = Contest.objects.get(id=contest_id)
+            participant = ContestParticipant.objects.get(
+                id=participant_id,
+                contest=contest
+            )
+            
+            # Only allow deactivating active participants
+            if not participant.is_active:
+                return Response({
+                    'error': 'Không thể kích hoạt lại người tham gia đã hủy đăng ký'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Deactivate participant
+            participant.is_active = False
+            participant.save()
+            
+            # Serialize updated participant
+            from .serializers import ContestParticipantSerializer
+            serializer = ContestParticipantSerializer(participant)
+            
+            return Response({
+                'message': 'Hủy kích hoạt người tham gia thành công',
+                'participant': serializer.data
+            }, status=status.HTTP_200_OK)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Cuộc thi không tồn tại'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except ContestParticipant.DoesNotExist:
+            return Response({
+                'error': 'Không tìm thấy người tham gia'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Không thể hủy kích hoạt người tham gia',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestRegistrationView(APIView):
+    """Register or unregister from a contest"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, contest_id):
+        """Register for a contest"""
+        try:
+            contest = Contest.objects.get(id=contest_id, visibility='public')
+            user = request.user
+            
+            # Check if contest has ended
+            now = timezone.now()
+            if now > contest.end_at:
+                return Response({
+                    'error': 'Không thể đăng ký cuộc thi đã kết thúc'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Check if user is already registered
+            participant, created = ContestParticipant.objects.get_or_create(
+                contest=contest,
+                user=user,
+                defaults={'is_active': True}
+            )
+            
+            if not created:
+                # If already exists, reactivate if previously cancelled
+                if not participant.is_active:
+                    participant.is_active = True
+                    participant.save()
+                    return Response({
+                        'message': 'Đăng ký lại cuộc thi thành công',
+                        'registered_at': participant.registered_at
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response({
+                        'error': 'Đã đăng ký cuộc thi này',
+                        'registered_at': participant.registered_at
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            return Response({
+                'message': 'Đăng ký cuộc thi thành công',
+                'registered_at': participant.registered_at
+            }, status=status.HTTP_201_CREATED)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Cuộc thi không tồn tại'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Không thể đăng ký cuộc thi',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def delete(self, request, contest_id):
+        """Unregister from a contest"""
+        try:
+            contest = Contest.objects.get(id=contest_id, visibility='public')
+            user = request.user
+            
+            # Check if contest has started or registration period ended
+            now = timezone.now()
+            if now >= contest.start_at:
+                return Response({
+                    'error': 'Không thể hủy đăng ký sau khi cuộc thi đã bắt đầu'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Find participant record
+            try:
+                participant = ContestParticipant.objects.get(
+                    contest=contest,
+                    user=user
+                )
+                
+                # Deactivate instead of delete to keep history
+                participant.is_active = False
+                participant.save()
+                
+                return Response({
+                    'message': 'Hủy đăng ký cuộc thi thành công'
+                }, status=status.HTTP_200_OK)
+                
+            except ContestParticipant.DoesNotExist:
+                return Response({
+                    'error': 'Chưa đăng ký cuộc thi này'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Cuộc thi không tồn tại'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Không thể hủy đăng ký cuộc thi',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestRegistrationStatusView(APIView):
+    """Check if user is registered for a contest"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, contest_id):
+        """Get registration status for current user"""
+        try:
+            contest = Contest.objects.get(id=contest_id, visibility='public')
+            user = request.user
+            
+            try:
+                participant = ContestParticipant.objects.get(
+                    contest=contest,
+                    user=user
+                )
+                
+                return Response({
+                    'is_registered': participant.is_active,
+                    'registered_at': participant.registered_at if participant.is_active else None
+                }, status=status.HTTP_200_OK)
+                
+            except ContestParticipant.DoesNotExist:
+                return Response({
+                    'is_registered': False,
+                    'registered_at': None
+                }, status=status.HTTP_200_OK)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Cuộc thi không tồn tại'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Không thể kiểm tra trạng thái đăng ký',
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -531,10 +785,10 @@ class ContestProblemDetailView(APIView):
             
         except ContestProblem.DoesNotExist:
             return Response({
-                'error': 'ContestProblem not found'
+                'error': 'Không tìm thấy ContestProblem'
             }, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({
-                'error': 'Failed to fetch ContestProblem details',
+                'error': 'Không thể tải chi tiết ContestProblem',
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

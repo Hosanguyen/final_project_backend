@@ -481,7 +481,7 @@ class SubmissionSerializer(serializers.ModelSerializer):
         fields = [
             "id", "problem", "user", "language", "contest_id", "contest_title",
             "code_text", "submitted_at", "status",
-            "score", "feedback", "domjudge_submission_id"
+            "score", "test_passed", "test_total", "feedback", "domjudge_submission_id"
         ]
         read_only_fields = ["id", "submitted_at"]
 
@@ -496,7 +496,7 @@ class SubmissionListSerializer(serializers.ModelSerializer):
         model = Submissions
         fields = [
             "id", "user", "language", "submitted_at",
-            "status", "score", "contest_id"
+            "status", "score", "test_passed", "test_total", "contest_id"
         ]
 
 
@@ -514,7 +514,7 @@ class SubmissionDetailSerializer(serializers.ModelSerializer):
         fields = [
             "id", "problem", "user", "language", "contest_id", "contest_title",
             "code_text", "submitted_at", "status",
-            "score", "feedback", "domjudge_submission_id",
+            "score", "test_passed", "test_total", "feedback", "domjudge_submission_id",
             "detailed_results"
         ]
         read_only_fields = ["id", "submitted_at"]

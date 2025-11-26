@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Contest, ContestProblem
+from .models import Contest, ContestProblem, ContestParticipant
 from problems.models import Problem
 from users.models import User
 
@@ -18,7 +18,7 @@ class ContestProblemSerializer(serializers.ModelSerializer):
                   'user_status']
     
     def get_user_status(self, obj):
-        """Get user's submission status for this problem"""
+        """Get user's submission status for this problem in this contest"""
         request = self.context.get('request')
         
         if not request or not request.user.is_authenticated:
@@ -28,13 +28,14 @@ class ContestProblemSerializer(serializers.ModelSerializer):
         from problems.models import Submissions
         
         try:
-            # Get all submissions for this user and problem
+            # Get all submissions for this user, problem, and contest
             submissions = Submissions.objects.filter(
                 user=request.user,
-                problem=obj.problem
+                problem=obj.problem,
+                contest=obj.contest
             ).order_by('-submitted_at')
             
-            print(f"[DEBUG] Found {submissions.count()} submissions for user={request.user.id}, problem={obj.problem.id}")
+            print(f"[DEBUG] Found {submissions.count()} submissions for user={request.user.id}, problem={obj.problem.id}, contest={obj.contest.id}")
             
             if not submissions.exists():
                 return None
@@ -75,7 +76,7 @@ class ContestCreateSerializer(serializers.ModelSerializer):
         model = Contest
         fields = [
             'slug', 'title', 'description', 'start_at', 'end_at',
-            'visibility', 'penalty_time', 'penalty_mode', 
+            'visibility', 'contest_mode', 'is_show_result', 'penalty_time', 'penalty_mode', 
             'freeze_rankings_at', 'problems'
         ]
     
@@ -148,12 +149,13 @@ class ContestSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
     updated_by_name = serializers.CharField(source='updated_by.username', read_only=True)
     problem_count = serializers.SerializerMethodField()
+    is_show_result = serializers.SerializerMethodField()
     
     class Meta:
         model = Contest
         fields = [
             'id', 'slug', 'title', 'description', 'start_at', 'end_at',
-            'visibility', 'penalty_time', 'penalty_mode', 'freeze_rankings_at',
+            'visibility', 'contest_mode', 'is_show_result', 'penalty_time', 'penalty_mode', 'freeze_rankings_at',
             'created_at', 'updated_at', 'created_by_name', 'updated_by_name',
             'problems', 'problem_count'
         ]
@@ -169,18 +171,35 @@ class ContestSerializer(serializers.ModelSerializer):
     
     def get_problem_count(self, obj):
         return obj.contest_problems.count()
+    
+    def get_is_show_result(self, obj):
+        """Automatically determine is_show_result based on contest status"""
+        # Always show results for practice contest
+        if obj.slug == "practice":
+            return True
+            
+        from django.utils import timezone
+        now = timezone.now()
+        
+        # If contest has ended, show results
+        if now > obj.end_at:
+            return True
+        # If contest is running or upcoming, hide results
+        else:
+            return False
 
 
 class ContestListSerializer(serializers.ModelSerializer):
     problem_count = serializers.SerializerMethodField()
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
     status = serializers.SerializerMethodField()
+    is_show_result = serializers.SerializerMethodField()
     
     class Meta:
         model = Contest
         fields = [
             'id', 'slug', 'title', 'start_at', 'end_at',
-            'visibility', 'penalty_time', 'problem_count',
+            'visibility', 'contest_mode', 'is_show_result', 'penalty_time', 'problem_count',
             'created_by_name', 'status', 'created_at'
         ]
     
@@ -197,6 +216,22 @@ class ContestListSerializer(serializers.ModelSerializer):
             return 'finished'
         else:
             return 'running'
+    
+    def get_is_show_result(self, obj):
+        """Automatically determine is_show_result based on contest status"""
+        # Always show results for practice contest
+        if obj.slug == "practice":
+            return True
+            
+        from django.utils import timezone
+        now = timezone.now()
+        
+        # If contest has ended, show results
+        if now > obj.end_at:
+            return True
+        # If contest is running or upcoming, hide results
+        else:
+            return False
 
 
 class AddProblemToContestSerializer(serializers.Serializer):
@@ -243,6 +278,13 @@ class ContestProblemDetailSerializer(serializers.ModelSerializer):
         else:
             status = 'running'
         
+        # Determine is_show_result based on contest status
+        # Always show results for practice contest
+        if obj.contest.slug == "practice":
+            is_show_result = True
+        else:
+            is_show_result = True if now > obj.contest.end_at else False
+        
         return {
             'id': obj.contest.id,
             'slug': obj.contest.slug,
@@ -251,6 +293,8 @@ class ContestProblemDetailSerializer(serializers.ModelSerializer):
             'start_at': obj.contest.start_at,
             'end_at': obj.contest.end_at,
             'visibility': obj.contest.visibility,
+            'contest_mode': obj.contest.contest_mode,
+            'is_show_result': is_show_result,
             'penalty_time': obj.contest.penalty_time,
             'penalty_mode': obj.contest.penalty_mode,
             'status': status
@@ -260,3 +304,16 @@ class ContestProblemDetailSerializer(serializers.ModelSerializer):
         """Return problem data"""
         from problems.serializers import ProblemDetailSerializer
         return ProblemDetailSerializer(obj.problem).data
+
+
+class ContestParticipantSerializer(serializers.ModelSerializer):
+    """Serializer for ContestParticipant"""
+    user_id = serializers.IntegerField(source='user.id', read_only=True)
+    username = serializers.CharField(source='user.username', read_only=True)
+    contest_id = serializers.IntegerField(source='contest.id', read_only=True)
+    contest_title = serializers.CharField(source='contest.title', read_only=True)
+    
+    class Meta:
+        model = ContestParticipant
+        fields = ['id', 'user_id', 'username', 'contest_id', 'contest_title', 'registered_at', 'is_active']
+        read_only_fields = ['id', 'registered_at']

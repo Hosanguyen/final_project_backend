@@ -11,7 +11,10 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
 from pathlib import Path
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -84,6 +87,8 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
+MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', '12345')
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
@@ -100,7 +105,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'domjudge',
         'USER': 'domjudge',
-        'PASSWORD': 'MYSQL_PASSWORD',
+        'PASSWORD': MYSQL_PASSWORD,
         'HOST': 'localhost',
         'PORT': '13306',
     },
@@ -190,10 +195,6 @@ CORS_ALLOW_METHODS = [
     "POST",
     "PUT",
 ]
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
