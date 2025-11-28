@@ -568,9 +568,8 @@ class SubmissionListView(APIView):
             if submission.domjudge_submission_id:
                 try:
                     # Lấy judgement từ DOMjudge
-                    judgement = domjudge_service.get_judgement(
-                        submission.domjudge_submission_id,
-                        contest_id=contest_id
+                    judgement = domjudge_service.get_judgement_summary(
+                        submission.domjudge_submission_id
                     )
                     
                     if judgement and judgement.get('valid'):

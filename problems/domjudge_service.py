@@ -296,6 +296,47 @@ timelimit: {problem.time_limit_ms / 1000}
             # Nếu chưa có judgement, trả về None
             return None
     
+    def get_judgement_summary(self, submitid):
+        import datetime, pytz
+        
+        sql = """
+            SELECT judgingid, submitid,
+                starttime, endtime, max_runtime_for_verdict as maxruntime,
+                valid, result
+            FROM judging
+            WHERE submitid = %s
+            ORDER BY judgingid DESC
+            LIMIT 1
+        """
+        rows = execute_raw_query('domjudge', sql, [submitid], fetch=True)
+        if not rows:
+            return None
+        
+        j = rows[0]
+
+        # Chuyển decimal -> datetime
+        tz = pytz.timezone('Asia/Bangkok')
+        start_dt = datetime.datetime.fromtimestamp(float(j['starttime']), tz)
+        end_dt   = datetime.datetime.fromtimestamp(float(j['endtime']), tz)
+
+        start_time_str = start_dt.isoformat()
+        end_time_str   = end_dt.isoformat()
+
+        start_contest_time = start_dt.strftime("%H:%M:%S.%f")[:-3]
+        end_contest_time   = end_dt.strftime("%H:%M:%S.%f")[:-3]
+
+        return {
+            "start_time": start_time_str,
+            "start_contest_time": start_contest_time,
+            "end_time": end_time_str,
+            "end_contest_time": end_contest_time,
+            "max_run_time": float(j['maxruntime']),
+            "submission_id": str(j['submitid']),
+            "id": str(j['judgingid']),
+            "valid": bool(j['valid']),
+            "judgement_type_id": j['result']
+        }
+
     def get_submissions_by_problem(self, problem_id, contest_id=None):
         """
         Lấy danh sách submissions theo problem từ DOMjudge

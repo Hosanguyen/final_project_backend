@@ -140,6 +140,9 @@ class ContestDetailView(APIView):
     def put(self, request, contest_id):
         try:
             contest = Contest.objects.get(id=contest_id)
+            contest_mode_changed = False
+            if 'contest_mode' in request.data and request.data['contest_mode'] != contest.contest_mode:
+                contest_mode_changed = True
             serializer = ContestCreateSerializer(contest, data=request.data, partial=True, context={'request': request})
             
             if not serializer.is_valid():
@@ -149,6 +152,10 @@ class ContestDetailView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             contest = serializer.save(updated_by=request.user)
+            if contest_mode_changed:
+                # Update lazy_eval_results in DOMjudge if contest_mode changed
+                domjudge_service = DOMjudgeContestService()
+                domjudge_service.update_lazy_eval_results_for_contest(contest)
             response_serializer = ContestSerializer(contest)
             
             return Response({
@@ -239,10 +246,17 @@ class ContestProblemView(APIView):
             # Sync with DOMjudge
             try:
                 domjudge_service = DOMjudgeContestService()
+                # DOMjudge: lazy_eval_results special handling
+                # If contest is OI mode, force value 2
+                if contest.contest_mode == 'OI':
+                    lazy_eval_flag = 2
+                else:
+                    lazy_eval_flag = 1 if serializer.validated_data.get('lazy_eval_results', False) else 0
+
                 domjudge_problem_data = {
                     'label': serializer.validated_data.get('label', ''),
                     'points': serializer.validated_data.get('points', 1),
-                    'lazy_eval_results': 1 if serializer.validated_data.get('lazy_eval_results', False) else 0
+                    'lazy_eval_results': lazy_eval_flag
                 }
                 
                 # Add optional fields
