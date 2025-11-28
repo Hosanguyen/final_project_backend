@@ -1031,3 +1031,32 @@ class ContestLeaderboardView(APIView):
                 'error': 'Failed to fetch leaderboard',
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestRecalculateRankingsView(APIView):
+    """Trigger a full rankings recalculation for a contest (admin utility)"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, contest_id):
+        try:
+            # Ensure contest exists
+            try:
+                contest = Contest.objects.get(id=contest_id)
+            except Contest.DoesNotExist:
+                return Response({'error': 'Contest not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            # Recalculate rankings for all active participants
+            updated_count = ContestRankingService.recalculate_all_rankings(contest_id)
+
+            return Response({
+                'message': 'Đã tính lại xếp hạng',
+                'updated_participants': updated_count,
+                'contest_id': contest.id,
+                'contest_slug': contest.slug
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({
+                'error': 'Không thể tính lại xếp hạng',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

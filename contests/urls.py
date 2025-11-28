@@ -15,6 +15,7 @@ from .views import (
     ContestLeaderboardView,
     ContestUserCandidatesView,
     ContestParticipantsBulkAddView,
+    ContestRecalculateRankingsView,
 )
 
 urlpatterns = [
@@ -34,4 +35,5 @@ urlpatterns = [
     path('<int:contest_id>/participants/bulk-add/', ContestParticipantsBulkAddView.as_view(), name='contest-participants-bulk-add'),
     path('<int:contest_id>/user-candidates/', ContestUserCandidatesView.as_view(), name='contest-user-candidates'),
     path('<int:contest_id>/participants/<int:participant_id>/toggle/', ContestParticipantToggleView.as_view(), name='contest-participant-toggle'),
+    path('<int:contest_id>/recalculate-rankings/', ContestRecalculateRankingsView.as_view(), name='contest-recalculate-rankings'),
 ]
