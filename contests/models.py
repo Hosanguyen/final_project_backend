@@ -53,8 +53,22 @@ class ContestParticipant(models.Model):
     contest = models.ForeignKey(Contest, on_delete=models.CASCADE, related_name="participants")
     registered_at = models.DateTimeField(auto_now_add=True, help_text="Time when the participant registered for the contest")
     is_active = models.BooleanField(default=True, help_text="Whether the participant is actively participating or has cancelled")
+    
+    # Ranking fields
+    solved_count = models.IntegerField(default=0, help_text="Number of problems solved (AC)")
+    total_score = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Total score (for OI mode)")
+    penalty_seconds = models.IntegerField(default=0, help_text="Penalty time in seconds (for ICPC mode)")
+    last_submission_at = models.DateTimeField(null=True, blank=True, help_text="Time of last submission")
+    ranking_updated_at = models.DateTimeField(auto_now=True, help_text="Last time ranking was updated")
 
     class Meta:
         db_table = "contest_participants"
         unique_together = ("contest", "user")
-        ordering = ["registered_at"]
+        ordering = ["-solved_count", "penalty_seconds", "last_submission_at"]
+        indexes = [
+            models.Index(fields=["contest", "-solved_count", "penalty_seconds"]),
+            models.Index(fields=["contest", "is_active"]),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.contest.title} (Solved: {self.solved_count}, Score: {self.total_score})"

@@ -603,6 +603,17 @@ class SubmissionListView(APIView):
                         # Cập nhật feedback
                         submission.feedback = f"Max run time: {judgement.get('max_run_time', 0)}s"
                         submission.save()
+                        
+                        # Update contest ranking if submission is for a contest
+                        if submission.contest:
+                            from contests.ranking_service import ContestRankingService
+                            try:
+                                ContestRankingService.update_user_ranking(
+                                    submission.contest.id,
+                                    submission.user.id
+                                )
+                            except Exception as e:
+                                print(f"Failed to update ranking: {str(e)}")
                 
                 except Exception as e:
                     print(f"Failed to sync submission {submission.id}: {str(e)}")
@@ -676,6 +687,17 @@ class SubmissionDetailView(APIView):
                     ]
                     submission.feedback = "\n".join(feedback_parts)
                     submission.save()
+                    
+                    # Update contest ranking if submission is for a contest
+                    if submission.contest:
+                        from contests.ranking_service import ContestRankingService
+                        try:
+                            ContestRankingService.update_user_ranking(
+                                submission.contest.id,
+                                submission.user.id
+                            )
+                        except Exception as e:
+                            print(f"Failed to update ranking: {str(e)}")
             
             except Exception as e:
                 print(f"Failed to sync submission result: {str(e)}")

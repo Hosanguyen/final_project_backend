@@ -1,0 +1,375 @@
+"""
+Service for calculating and updating contest rankings
+"""
+from django.db.models import Q, Count, Sum, Max, Min, F
+from django.utils import timezone
+from decimal import Decimal
+from .models import Contest, ContestParticipant, ContestProblem
+from problems.models import Submissions
+
+
+class ContestRankingService:
+    """Service to calculate and update contest rankings"""
+    
+    @staticmethod
+    def update_user_ranking(contest_id, user_id):
+        """
+        Update ranking for a specific user in a contest
+        Called after each submission
+        """
+        from contests.models import Contest, ContestParticipant
+        from users.models import User
+        
+        try:
+            contest = Contest.objects.get(id=contest_id)
+            user = User.objects.get(id=user_id)
+            
+            # Get or create participant
+            participant, _ = ContestParticipant.objects.get_or_create(
+                contest=contest,
+                user=user,
+                defaults={'is_active': True}
+            )
+            
+        except (Contest.DoesNotExist, User.DoesNotExist):
+            return None
+        
+        if contest.slug == 'practice':
+            # Practice mode: only count solved problems
+            ContestRankingService._calculate_practice_ranking(participant, contest, user)
+        elif contest.contest_mode == 'ICPC':
+            # ICPC mode: count solved + penalty time
+            ContestRankingService._calculate_icpc_ranking(participant, contest, user)
+        elif contest.contest_mode == 'OI':
+            # OI mode: sum scores from all problems
+            ContestRankingService._calculate_oi_ranking(participant, contest, user)
+        
+        participant.save()
+        return participant
+    
+    @staticmethod
+    def _calculate_practice_ranking(participant, contest, user):
+        """
+        Calculate ranking for practice contest
+        Only count number of solved problems
+        """
+        # Get all AC submissions for this user in this contest
+        ac_submissions = Submissions.objects.filter(
+            contest=contest,
+            user=user,
+            status__in=['AC', 'correct', 'Correct']
+        ).values('problem').distinct()
+        
+        solved_count = ac_submissions.count()
+        
+        # Get last submission time
+        last_submission = Submissions.objects.filter(
+            contest=contest,
+            user=user
+        ).order_by('-submitted_at').first()
+        
+        participant.solved_count = solved_count
+        participant.total_score = Decimal(solved_count)  # Score = number of solved problems
+        participant.penalty_seconds = 0  # No penalty in practice mode
+        participant.last_submission_at = last_submission.submitted_at if last_submission else None
+    
+    @staticmethod
+    def _calculate_icpc_ranking(participant, contest, user):
+        """
+        Calculate ranking for ICPC mode contest
+        
+        Rules:
+        1. Each solved problem = 1 point
+        2. Penalty = time to AC + (wrong submissions * penalty_time)
+        3. Time is calculated from contest start to first AC
+        4. Only AC problems contribute to penalty
+        """
+        contest_problems = ContestProblem.objects.filter(contest=contest)
+        
+        solved_count = 0
+        total_penalty_minutes = 0
+        last_submission_time = None
+        
+        for contest_problem in contest_problems:
+            # Get all submissions for this problem by this user
+            submissions = Submissions.objects.filter(
+                contest=contest,
+                user=user,
+                problem=contest_problem.problem
+            ).order_by('submitted_at')
+            
+            if not submissions.exists():
+                continue
+            
+            # Find first AC submission
+            first_ac = submissions.filter(
+                status__in=['AC', 'correct', 'Correct']
+            ).first()
+            
+            if first_ac:
+                solved_count += 1
+                
+                # Calculate time from contest start to AC (in minutes)
+                time_to_ac = (first_ac.submitted_at - contest.start_at).total_seconds() / 60
+                
+                # Count wrong submissions before first AC
+                wrong_count = submissions.filter(
+                    submitted_at__lt=first_ac.submitted_at
+                ).exclude(
+                    status__in=['AC', 'correct', 'Correct']
+                ).count()
+                
+                # Calculate penalty for this problem
+                problem_penalty = time_to_ac + (wrong_count * contest.penalty_time)
+                total_penalty_minutes += problem_penalty
+            
+            # Track last submission
+            last_sub = submissions.last()
+            if not last_submission_time or last_sub.submitted_at > last_submission_time:
+                last_submission_time = last_sub.submitted_at
+        
+        participant.solved_count = solved_count
+        participant.total_score = Decimal(solved_count)
+        participant.penalty_seconds = int(total_penalty_minutes * 60)  # Convert to seconds
+        participant.last_submission_at = last_submission_time
+    
+    @staticmethod
+    def _calculate_oi_ranking(participant, contest, user):
+        """
+        Calculate ranking for OI mode contest
+        
+        Rules:
+        1. Each problem has max points (usually 100)
+        2. Score = sum of (tests_passed / total_tests) * max_points for each problem
+        3. Take best submission for each problem
+        """
+        contest_problems = ContestProblem.objects.filter(contest=contest)
+        
+        total_score = Decimal(0)
+        solved_count = 0  # Count problems with 100% score
+        last_submission_time = None
+        
+        for contest_problem in contest_problems:
+            # Get all submissions for this problem by this user
+            submissions = Submissions.objects.filter(
+                contest=contest,
+                user=user,
+                problem=contest_problem.problem
+            ).order_by('submitted_at')
+
+            if not submissions.exists():
+                continue
+
+            # Recompute score from test_passed/test_total and choose the best
+            max_points = Decimal(contest_problem.point or 100)
+            best_score_for_problem = Decimal(0)
+
+            for sub in submissions:
+                # Track last submission time while iterating
+                if not last_submission_time or sub.submitted_at > last_submission_time:
+                    last_submission_time = sub.submitted_at
+
+                tp = getattr(sub, 'test_passed', None)
+                tt = getattr(sub, 'test_total', None)
+
+                if tp is None or tt in (None, 0):
+                    continue
+
+                # Compute fractional score and clamp within [0, max_points]
+                try:
+                    frac = Decimal(tp) / Decimal(tt)
+                except Exception:
+                    continue
+
+                computed = (frac * max_points)
+                if computed > best_score_for_problem:
+                    best_score_for_problem = computed
+
+            # Accumulate the best score for this problem
+            total_score += best_score_for_problem
+
+            # Count as solved if achieved full points for the problem
+            if best_score_for_problem >= max_points:
+                solved_count += 1
+        
+        participant.solved_count = solved_count
+        participant.total_score = total_score
+        participant.penalty_seconds = 0  # No penalty in OI mode, use last_submission_at for tiebreaker
+        participant.last_submission_at = last_submission_time
+    
+    @staticmethod
+    def get_contest_leaderboard(contest_id):
+        """
+        Get full leaderboard for a contest
+        Returns list of participants with ranking info
+        """
+        from contests.models import Contest, ContestParticipant
+        
+        try:
+            contest = Contest.objects.get(id=contest_id)
+        except Contest.DoesNotExist:
+            return []
+        
+        # Get all active participants for this contest
+        if contest.slug == 'practice':
+            # Practice: order by solved_count desc
+            participants = ContestParticipant.objects.filter(
+                contest=contest,
+                is_active=True
+            ).select_related('user', 'contest').order_by(
+                '-solved_count',
+                'last_submission_at'
+            )
+        elif contest.contest_mode == 'ICPC':
+            # ICPC: order by solved_count desc, penalty_seconds asc, last_submission_at asc
+            participants = ContestParticipant.objects.filter(
+                contest=contest,
+                is_active=True
+            ).select_related('user', 'contest').order_by(
+                '-solved_count',
+                'penalty_seconds',
+                'last_submission_at'
+            )
+        elif contest.contest_mode == 'OI':
+            # OI: order by total_score desc, last_submission_at asc
+            participants = ContestParticipant.objects.filter(
+                contest=contest,
+                is_active=True
+            ).select_related('user', 'contest').order_by(
+                '-total_score',
+                'last_submission_at'
+            )
+            for participant in participants:
+                ContestRankingService.update_user_ranking(contest_id, participant.user.id)
+        else:
+            participants = ContestParticipant.objects.filter(
+                contest=contest,
+                is_active=True
+            ).select_related('user', 'contest').order_by(
+                '-solved_count',
+                'penalty_seconds'
+            )
+        
+        return participants
+    
+    @staticmethod
+    def get_user_problem_details(contest_id, user_id):
+        """
+        Get detailed submission info for each problem in the contest for a user
+        Used for ICPC leaderboard display
+        
+        Returns dict: {
+            problem_id: {
+                'status': 'AC'/'WA'/'pending'/None,
+                'attempts': number of submissions,
+                'time_minutes': time to AC in minutes (from contest start),
+                'penalty': penalty time for this problem
+            }
+        }
+        """
+        from contests.models import Contest, ContestProblem
+        
+        try:
+            contest = Contest.objects.get(id=contest_id)
+        except Contest.DoesNotExist:
+            return {}
+        
+        contest_problems = ContestProblem.objects.filter(contest=contest).order_by('label')
+        problem_details = {}
+        
+        for contest_problem in contest_problems:
+            submissions = Submissions.objects.filter(
+                contest=contest,
+                user_id=user_id,
+                problem=contest_problem.problem
+            ).order_by('submitted_at')
+            
+            if not submissions.exists():
+                problem_details[contest_problem.problem.id] = {
+                    'problem_label': contest_problem.label,
+                    'status': None,
+                    'attempts': 0,
+                    'time_minutes': None,
+                    'penalty': 0,
+                    'score': None,
+                    'test_passed': None,
+                    'test_total': None
+                }
+                continue
+            
+            # Find first AC
+            first_ac = submissions.filter(
+                status__in=['AC', 'correct', 'Correct']
+            ).first()
+            
+            total_attempts = submissions.count()
+            
+            if first_ac:
+                # Calculate time to AC
+                time_to_ac_minutes = int((first_ac.submitted_at - contest.start_at).total_seconds() / 60)
+                
+                # Count wrong submissions before AC
+                wrong_before_ac = submissions.filter(
+                    submitted_at__lt=first_ac.submitted_at
+                ).exclude(
+                    status__in=['AC', 'correct', 'Correct']
+                ).count()
+                
+                problem_details[contest_problem.problem.id] = {
+                    'problem_label': contest_problem.label,
+                    'status': 'AC',
+                    'attempts': total_attempts,
+                    'wrong_attempts': wrong_before_ac,
+                    'time_minutes': time_to_ac_minutes,
+                    'penalty': time_to_ac_minutes + (wrong_before_ac * contest.penalty_time),
+                    'score': first_ac.score,
+                    'test_passed': first_ac.test_passed,
+                    'test_total': first_ac.test_total
+                }
+            else:
+                # No AC, check if there are wrong submissions
+                has_wrong = submissions.exclude(
+                    status__in=['AC', 'correct', 'Correct']
+                ).exists()
+                
+                last_submission = submissions.last()
+                
+                problem_details[contest_problem.problem.id] = {
+                    'problem_label': contest_problem.label,
+                    'status': 'WA' if has_wrong else 'pending',
+                    'attempts': total_attempts,
+                    'wrong_attempts': total_attempts,
+                    'time_minutes': None,
+                    'penalty': 0,
+                    'score': last_submission.score if contest.contest_mode == 'OI' else None,
+                    'test_passed': last_submission.test_passed,
+                    'test_total': last_submission.test_total
+                }
+        
+        return problem_details
+    
+    @staticmethod
+    def recalculate_all_rankings(contest_id):
+        """
+        Recalculate rankings for all participants in a contest
+        Useful for manual recalculation or fixing inconsistencies
+        """
+        from contests.models import Contest, ContestParticipant
+        
+        try:
+            contest = Contest.objects.get(id=contest_id)
+        except Contest.DoesNotExist:
+            return 0
+        
+        # Get all active participants
+        participants = ContestParticipant.objects.filter(
+            contest=contest,
+            is_active=True
+        )
+        
+        count = 0
+        for participant in participants:
+            ContestRankingService.update_user_ranking(contest_id, participant.user.id)
+            count += 1
+        
+        return count

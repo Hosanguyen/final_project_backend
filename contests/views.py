@@ -9,9 +9,11 @@ from .models import Contest, ContestProblem, ContestParticipant
 from .serializers import (
     ContestCreateSerializer,
     ContestSerializer,
-    ContestListSerializer
+    ContestListSerializer,
+    LeaderboardEntrySerializer
 )
 from .domjudge_service import DOMjudgeContestService
+from .ranking_service import ContestRankingService
 from common.authentication import CustomJWTAuthentication
 
 
@@ -518,6 +520,7 @@ class UserContestDetailView(APIView):
                 'end_at': contest.end_at,
                 'penalty_time': contest.penalty_time,
                 'penalty_mode': contest.penalty_mode,
+                'contest_mode': contest.contest_mode,
                 'status': contest_status,
                 'problem_count': ContestProblem.objects.filter(contest=contest).count(),
                 'is_registered': is_registered,
@@ -783,12 +786,100 @@ class ContestProblemDetailView(APIView):
             
             return Response(serializer.data, status=status.HTTP_200_OK)
             
-        except ContestProblem.DoesNotExist:
+        except Contest.DoesNotExist:
             return Response({
                 'error': 'Không tìm thấy ContestProblem'
             }, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({
                 'error': 'Không thể tải chi tiết ContestProblem',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestLeaderboardView(APIView):
+    """Get leaderboard for a contest"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, contest_id):
+        """Get contest leaderboard with rankings"""
+        try:
+            contest = Contest.objects.get(id=contest_id)
+            
+            # Get contest problems for column headers
+            contest_problems = ContestProblem.objects.filter(
+                contest=contest
+            ).select_related('problem').order_by('label')
+            
+            problem_list = [{
+                'id': cp.problem.id,
+                'label': cp.label,
+                'alias': cp.alias,
+                'point': cp.point,
+                'title': cp.problem.title
+            } for cp in contest_problems]
+            
+            # Get rankings
+            participants = ContestRankingService.get_contest_leaderboard(contest_id)
+            
+            # Build leaderboard entries
+            leaderboard_data = []
+            current_rank = 1
+            
+            for idx, participant in enumerate(participants, start=1):
+                # Get problem details for this user (for ICPC mode)
+                problem_details = {}
+                if contest.contest_mode == 'ICPC' or contest.slug == 'practice':
+                    problem_details = ContestRankingService.get_user_problem_details(
+                        contest_id,
+                        participant.user.id
+                    )
+                
+                # Get full name
+                full_name = participant.user.full_name if participant.user.full_name else participant.user.username
+                
+                # Get avatar URL properly
+                avatar_url = None
+                if participant.user.avatar_url:
+                    avatar_url = participant.user.avatar_url.url if hasattr(participant.user.avatar_url, 'url') else str(participant.user.avatar_url)
+                
+                entry = {
+                    'rank': current_rank,
+                    'user_id': participant.user.id,
+                    'username': participant.user.username,
+                    'full_name': full_name,
+                    'avatar_url': avatar_url,
+                    'solved_count': participant.solved_count,
+                    'total_score': float(participant.total_score),
+                    'penalty_seconds': participant.penalty_seconds,
+                    'penalty_minutes': participant.penalty_seconds // 60,
+                    'last_submission_at': participant.last_submission_at,
+                    'problems': problem_details
+                }
+                
+                leaderboard_data.append(entry)
+                current_rank += 1
+            
+            return Response({
+                'contest_id': contest.id,
+                'contest_slug': contest.slug,
+                'contest_title': contest.title,
+                'contest_mode': contest.contest_mode,
+                'penalty_time': contest.penalty_time,
+                'problems': problem_list,
+                'leaderboard': leaderboard_data,
+                'total_participants': len(leaderboard_data)
+            }, status=status.HTTP_200_OK)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Contest not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'error': 'Failed to fetch leaderboard',
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

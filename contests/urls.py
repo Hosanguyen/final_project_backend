@@ -12,6 +12,7 @@ from .views import (
     ContestRegistrationStatusView,
     ContestParticipantsView,
     ContestParticipantToggleView,
+    ContestLeaderboardView,
 )
 
 urlpatterns = [
@@ -20,6 +21,7 @@ urlpatterns = [
     path('<int:contest_id>/', ContestDetailView.as_view(), name='contest-detail'),
     path('<int:contest_id>/problems/', ContestProblemView.as_view(), name='contest-add-problem'),
     path('<int:contest_id>/problems/<int:problem_id>/', ContestProblemView.as_view(), name='contest-remove-problem'),
+    path('<int:contest_id>/leaderboard/', ContestLeaderboardView.as_view(), name='contest-leaderboard'),
     path('practice/contest/', ContestDetailUserView.as_view(), name='practice-contest-detail'),
     path('user/contests/', UserContestsView.as_view(), name='user-contests'),
     path('user/<int:contest_id>/', UserContestDetailView.as_view(), name='user-contest-detail'),
