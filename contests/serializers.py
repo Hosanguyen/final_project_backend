@@ -310,10 +310,42 @@ class ContestParticipantSerializer(serializers.ModelSerializer):
     """Serializer for ContestParticipant"""
     user_id = serializers.IntegerField(source='user.id', read_only=True)
     username = serializers.CharField(source='user.username', read_only=True)
+    full_name = serializers.SerializerMethodField()
+    avatar_url = serializers.SerializerMethodField()
     contest_id = serializers.IntegerField(source='contest.id', read_only=True)
     contest_title = serializers.CharField(source='contest.title', read_only=True)
     
     class Meta:
         model = ContestParticipant
-        fields = ['id', 'user_id', 'username', 'contest_id', 'contest_title', 'registered_at', 'is_active']
-        read_only_fields = ['id', 'registered_at']
+        fields = [
+            'id', 'user_id', 'username', 'full_name', 'avatar_url', 
+            'contest_id', 'contest_title', 'registered_at', 'is_active',
+            'solved_count', 'total_score', 'penalty_seconds', 
+            'last_submission_at', 'ranking_updated_at'
+        ]
+        read_only_fields = ['id', 'registered_at', 'ranking_updated_at']
+    
+    def get_full_name(self, obj):
+        """Get user's full name"""
+        return obj.user.full_name if obj.user.full_name else obj.user.username
+    
+    def get_avatar_url(self, obj):
+        """Get user's avatar URL"""
+        if obj.user.avatar_url:
+            return obj.user.avatar_url.url if hasattr(obj.user.avatar_url, 'url') else str(obj.user.avatar_url)
+        return None
+
+
+class LeaderboardEntrySerializer(serializers.Serializer):
+    """Serializer for leaderboard entry with problem details"""
+    rank = serializers.IntegerField()
+    user_id = serializers.IntegerField()
+    username = serializers.CharField()
+    full_name = serializers.CharField()
+    avatar_url = serializers.CharField(allow_null=True)
+    solved_count = serializers.IntegerField()
+    total_score = serializers.DecimalField(max_digits=10, decimal_places=2)
+    penalty_seconds = serializers.IntegerField()
+    penalty_minutes = serializers.IntegerField()
+    last_submission_at = serializers.DateTimeField(allow_null=True)
+    problems = serializers.DictField(required=False)  # Problem details for ICPC mode

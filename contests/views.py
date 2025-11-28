@@ -4,14 +4,19 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from datetime import timedelta
+from django.db.models import Q
+from django.core.paginator import Paginator, EmptyPage
 
 from .models import Contest, ContestProblem, ContestParticipant
 from .serializers import (
     ContestCreateSerializer,
     ContestSerializer,
-    ContestListSerializer
+    ContestListSerializer,
+    LeaderboardEntrySerializer
 )
 from .domjudge_service import DOMjudgeContestService
+from .ranking_service import ContestRankingService
+from problems.models import Submissions
 from common.authentication import CustomJWTAuthentication
 
 
@@ -518,6 +523,7 @@ class UserContestDetailView(APIView):
                 'end_at': contest.end_at,
                 'penalty_time': contest.penalty_time,
                 'penalty_mode': contest.penalty_mode,
+                'contest_mode': contest.contest_mode,
                 'status': contest_status,
                 'problem_count': ContestProblem.objects.filter(contest=contest).count(),
                 'is_registered': is_registered,
@@ -627,6 +633,135 @@ class ContestParticipantToggleView(APIView):
                 'error': 'Không thể hủy kích hoạt người tham gia',
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestUserCandidatesView(APIView):
+    """List user candidates for adding to contest (searchable)"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, contest_id):
+        from users.models import User
+        try:
+            contest = Contest.objects.get(id=contest_id)
+        except Contest.DoesNotExist:
+            return Response({'error': 'Cuộc thi không tồn tại'}, status=status.HTTP_404_NOT_FOUND)
+
+        q = request.query_params.get('q', '').strip()
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 20))
+        exclude_participating = request.query_params.get('exclude_participating', 'true').lower() != 'false'
+
+        # Validate pagination params
+        if page < 1:
+            page = 1
+        if page_size < 1:
+            page_size = 20
+        if page_size > 100:
+            page_size = 100
+
+        queryset = User.objects.all()
+
+        if q:
+            queryset = queryset.filter(
+                Q(username__icontains=q) |
+                Q(email__icontains=q) |
+                Q(full_name__icontains=q)
+            )
+
+        if exclude_participating:
+            # Exclude only users currently active in this contest; allow previously inactive participants to appear
+            participant_user_ids = ContestParticipant.objects.filter(
+                contest=contest,
+                is_active=True
+            ).values_list('user_id', flat=True)
+            queryset = queryset.exclude(id__in=participant_user_ids)
+
+        queryset = queryset.order_by('username')
+
+        paginator = Paginator(queryset, page_size)
+        try:
+            page_obj = paginator.page(page)
+        except EmptyPage:
+            page = paginator.num_pages if paginator.num_pages > 0 else 1
+            page_obj = paginator.page(page)
+
+        def avatar(u):
+            try:
+                return u.avatar_url.url if u.avatar_url and hasattr(u.avatar_url, 'url') else None
+            except Exception:
+                return None
+
+        data = [
+            {
+                'id': u.id,
+                'username': u.username,
+                'full_name': getattr(u, 'full_name', '') or u.username,
+                'email': u.email,
+                'avatar_url': avatar(u)
+            }
+            for u in page_obj.object_list
+        ]
+
+        return Response({
+            'results': data,
+            'pagination': {
+                'current_page': page,
+                'page_size': page_size,
+                'total_items': paginator.count,
+                'total_pages': paginator.num_pages,
+                'has_next': page_obj.has_next(),
+                'has_previous': page_obj.has_previous()
+            }
+        }, status=status.HTTP_200_OK)
+
+
+class ContestParticipantsBulkAddView(APIView):
+    """Bulk add users as participants to a contest"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, contest_id):
+        from users.models import User
+        try:
+            contest = Contest.objects.get(id=contest_id)
+        except Contest.DoesNotExist:
+            return Response({'error': 'Cuộc thi không tồn tại'}, status=status.HTTP_404_NOT_FOUND)
+
+        user_ids = request.data.get('user_ids', [])
+        if not isinstance(user_ids, list) or not user_ids:
+            return Response({'error': 'Danh sách user_ids không hợp lệ'}, status=status.HTTP_400_BAD_REQUEST)
+
+        users = User.objects.filter(id__in=user_ids)
+        found_ids = set(users.values_list('id', flat=True))
+
+        added = []
+        existed = []
+        for uid in found_ids:
+            participant, created = ContestParticipant.objects.get_or_create(
+                contest=contest,
+                user_id=uid,
+                defaults={'is_active': True}
+            )
+            if not created:
+                if not participant.is_active:
+                    participant.is_active = True
+                    participant.save(update_fields=['is_active'])
+                existed.append(uid)
+            else:
+                added.append(uid)
+
+        missing = [uid for uid in user_ids if uid not in found_ids]
+
+        return Response({
+            'message': 'Đã xử lý thêm người tham gia',
+            'added_count': len(added),
+            'existed_count': len(existed),
+            'missing_count': len(missing),
+            'added_user_ids': added,
+            'existed_user_ids': existed,
+            'missing_user_ids': missing
+        }, status=status.HTTP_200_OK)
 
 
 class ContestRegistrationView(APIView):
@@ -783,12 +918,145 @@ class ContestProblemDetailView(APIView):
             
             return Response(serializer.data, status=status.HTTP_200_OK)
             
-        except ContestProblem.DoesNotExist:
+        except Contest.DoesNotExist:
             return Response({
                 'error': 'Không tìm thấy ContestProblem'
             }, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({
                 'error': 'Không thể tải chi tiết ContestProblem',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestLeaderboardView(APIView):
+    """Get leaderboard for a contest"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, contest_id):
+        """Get contest leaderboard with rankings"""
+        try:
+            contest = Contest.objects.get(id=contest_id)
+            
+            # Get contest problems for column headers
+            contest_problems = ContestProblem.objects.filter(
+                contest=contest
+            ).select_related('problem').order_by('label')
+            
+            problem_list = [{
+                'id': cp.problem.id,
+                'label': cp.label,
+                'alias': cp.alias,
+                'point': cp.point,
+                'title': cp.problem.title
+            } for cp in contest_problems]
+            
+            # Get rankings
+            participants = ContestRankingService.get_contest_leaderboard(contest_id)
+            
+            # Build leaderboard entries
+            leaderboard_data = []
+            current_rank = 1
+            
+            for idx, participant in enumerate(participants, start=1):
+                # Get problem details for this user (for ICPC mode)
+                problem_details = {}
+                if contest.contest_mode == 'ICPC' or contest.slug == 'practice':
+                    problem_details = ContestRankingService.get_user_problem_details(
+                        contest_id,
+                        participant.user.id
+                    )
+                
+                # Get full name
+                full_name = participant.user.full_name if participant.user.full_name else participant.user.username
+                
+                # Get avatar URL properly
+                avatar_url = None
+                if participant.user.avatar_url:
+                    avatar_url = participant.user.avatar_url.url if hasattr(participant.user.avatar_url, 'url') else str(participant.user.avatar_url)
+                
+                # Attempted problems (distinct problems with any submission)
+                attempted_count = None
+                try:
+                    # Only compute for practice to avoid heavy queries elsewhere
+                    if contest.slug == 'practice':
+                        # Count distinct problems the user has ever submitted within the window
+                        attempted_count = Submissions.objects.filter(
+                            contest=contest,
+                            user=participant.user,
+                            submitted_at__gte=contest.start_at,
+                            submitted_at__lte=contest.end_at
+                        ).values('problem').distinct().count()
+                except Exception:
+                    attempted_count = None
+
+                entry = {
+                    'rank': current_rank,
+                    'user_id': participant.user.id,
+                    'username': participant.user.username,
+                    'full_name': full_name,
+                    'avatar_url': avatar_url,
+                    'solved_count': participant.solved_count,
+                    'total_score': float(participant.total_score),
+                    'penalty_seconds': participant.penalty_seconds,
+                    'penalty_minutes': participant.penalty_seconds // 60,
+                    'last_submission_at': participant.last_submission_at,
+                    'problems': problem_details,
+                    'attempted_count': attempted_count
+                }
+                
+                leaderboard_data.append(entry)
+                current_rank += 1
+            
+            return Response({
+                'contest_id': contest.id,
+                'contest_slug': contest.slug,
+                'contest_title': contest.title,
+                'contest_mode': contest.contest_mode,
+                'penalty_time': contest.penalty_time,
+                'problems': problem_list,
+                'leaderboard': leaderboard_data,
+                'total_participants': len(leaderboard_data)
+            }, status=status.HTTP_200_OK)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Contest not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'error': 'Failed to fetch leaderboard',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestRecalculateRankingsView(APIView):
+    """Trigger a full rankings recalculation for a contest (admin utility)"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, contest_id):
+        try:
+            # Ensure contest exists
+            try:
+                contest = Contest.objects.get(id=contest_id)
+            except Contest.DoesNotExist:
+                return Response({'error': 'Contest not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            # Recalculate rankings for all active participants
+            updated_count = ContestRankingService.recalculate_all_rankings(contest_id)
+
+            return Response({
+                'message': 'Đã tính lại xếp hạng',
+                'updated_participants': updated_count,
+                'contest_id': contest.id,
+                'contest_slug': contest.slug
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({
+                'error': 'Không thể tính lại xếp hạng',
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

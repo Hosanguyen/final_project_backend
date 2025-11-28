@@ -12,6 +12,10 @@ from .views import (
     ContestRegistrationStatusView,
     ContestParticipantsView,
     ContestParticipantToggleView,
+    ContestLeaderboardView,
+    ContestUserCandidatesView,
+    ContestParticipantsBulkAddView,
+    ContestRecalculateRankingsView,
 )
 
 urlpatterns = [
@@ -20,6 +24,7 @@ urlpatterns = [
     path('<int:contest_id>/', ContestDetailView.as_view(), name='contest-detail'),
     path('<int:contest_id>/problems/', ContestProblemView.as_view(), name='contest-add-problem'),
     path('<int:contest_id>/problems/<int:problem_id>/', ContestProblemView.as_view(), name='contest-remove-problem'),
+    path('<int:contest_id>/leaderboard/', ContestLeaderboardView.as_view(), name='contest-leaderboard'),
     path('practice/contest/', ContestDetailUserView.as_view(), name='practice-contest-detail'),
     path('user/contests/', UserContestsView.as_view(), name='user-contests'),
     path('user/<int:contest_id>/', UserContestDetailView.as_view(), name='user-contest-detail'),
@@ -27,5 +32,8 @@ urlpatterns = [
     path('user/<int:contest_id>/register/', ContestRegistrationView.as_view(), name='contest-register'),
     path('user/<int:contest_id>/registration-status/', ContestRegistrationStatusView.as_view(), name='contest-registration-status'),
     path('<int:contest_id>/participants/', ContestParticipantsView.as_view(), name='contest-participants'),
+    path('<int:contest_id>/participants/bulk-add/', ContestParticipantsBulkAddView.as_view(), name='contest-participants-bulk-add'),
+    path('<int:contest_id>/user-candidates/', ContestUserCandidatesView.as_view(), name='contest-user-candidates'),
     path('<int:contest_id>/participants/<int:participant_id>/toggle/', ContestParticipantToggleView.as_view(), name='contest-participant-toggle'),
+    path('<int:contest_id>/recalculate-rankings/', ContestRecalculateRankingsView.as_view(), name='contest-recalculate-rankings'),
 ]
