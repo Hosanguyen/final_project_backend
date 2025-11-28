@@ -963,7 +963,9 @@ class ContestLeaderboardView(APIView):
                 'label': cp.label,
                 'alias': cp.alias,
                 'point': cp.point,
-                'title': cp.problem.title
+                'title': cp.problem.title,
+                'color': cp.color or '',
+                'rgb': cp.rgb or ''
             } for cp in contest_problems]
             
             # Get rankings
