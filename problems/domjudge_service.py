@@ -1,3 +1,4 @@
+import pytz
 import requests
 import zipfile
 from io import BytesIO
@@ -299,6 +300,28 @@ timelimit: {problem.time_limit_ms / 1000}
     def get_judgement_summary(self, submitid):
         import datetime, pytz
         
+        JUDGEMENT_MAP = {
+            'final': {
+                'compiler-error': 'CE',
+                'memory-limit': 'MLE',
+                'output-limit': 'OLE',
+                'run-error': 'RTE',
+                'timelimit': 'TLE',
+                'wrong-answer': 'WA',
+                'no-output': 'NO',
+                'correct': 'AC',
+            },
+            'error': {
+                'aborted': 'JE',
+                'import-error': 'IE',
+            },
+            'in_progress': {
+                'judging': 'JU',
+                'pending': 'JU',
+                'queued': 'JU',
+            }
+        }
+
         sql = """
             SELECT judgingid, submitid,
                 starttime, endtime, max_runtime_for_verdict as maxruntime,
@@ -315,16 +338,32 @@ timelimit: {problem.time_limit_ms / 1000}
         j = rows[0]
 
         # Chuyển decimal -> datetime
-        tz = pytz.timezone('Asia/Bangkok')
-        start_dt = datetime.datetime.fromtimestamp(float(j['starttime']), tz)
-        end_dt   = datetime.datetime.fromtimestamp(float(j['endtime']), tz)
+        tz = pytz.timezone('Asia/Ho_Chi_Minh')
 
-        start_time_str = start_dt.isoformat()
-        end_time_str   = end_dt.isoformat()
+        start_dt = None
+        end_dt = None
+        start_time_str = None
+        end_time_str = None
+        start_contest_time = None
+        end_contest_time = None
 
-        start_contest_time = start_dt.strftime("%H:%M:%S.%f")[:-3]
-        end_contest_time   = end_dt.strftime("%H:%M:%S.%f")[:-3]
+        if j['starttime'] is not None:
+            start_dt = datetime.datetime.fromtimestamp(float(j['starttime']), tz)
+            start_time_str = start_dt.isoformat()
+            start_contest_time = start_dt.strftime("%H:%M:%S.%f")[:-3]
 
+        if j['endtime'] is not None:
+            end_dt = datetime.datetime.fromtimestamp(float(j['endtime']), tz)
+            end_time_str = end_dt.isoformat()
+            end_contest_time = end_dt.strftime("%H:%M:%S.%f")[:-3]
+            
+        result_key = j['result']
+        judgement_type_id = (
+            JUDGEMENT_MAP['final'].get(result_key)
+            or JUDGEMENT_MAP['error'].get(result_key)
+            or JUDGEMENT_MAP['in_progress'].get(result_key)
+            or result_key  # fallback nếu chưa map
+        )
         return {
             "start_time": start_time_str,
             "start_contest_time": start_contest_time,
@@ -334,7 +373,7 @@ timelimit: {problem.time_limit_ms / 1000}
             "submission_id": str(j['submitid']),
             "id": str(j['judgingid']),
             "valid": bool(j['valid']),
-            "judgement_type_id": j['result']
+            "judgement_type_id": judgement_type_id
         }
 
     def get_submissions_by_problem(self, problem_id, contest_id=None):
