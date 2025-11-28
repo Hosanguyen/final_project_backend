@@ -57,7 +57,9 @@ class ContestRankingService:
         ac_submissions = Submissions.objects.filter(
             contest=contest,
             user=user,
-            status__in=['AC', 'correct', 'Correct']
+            status__in=['AC', 'correct', 'Correct'],
+            submitted_at__gte=contest.start_at,
+            submitted_at__lte=contest.end_at
         ).values('problem').distinct()
         
         solved_count = ac_submissions.count()
@@ -65,7 +67,9 @@ class ContestRankingService:
         # Get last submission time
         last_submission = Submissions.objects.filter(
             contest=contest,
-            user=user
+            user=user,
+            submitted_at__gte=contest.start_at,
+            submitted_at__lte=contest.end_at
         ).order_by('-submitted_at').first()
         
         participant.solved_count = solved_count
@@ -95,7 +99,9 @@ class ContestRankingService:
             submissions = Submissions.objects.filter(
                 contest=contest,
                 user=user,
-                problem=contest_problem.problem
+                problem=contest_problem.problem,
+                submitted_at__gte=contest.start_at,
+                submitted_at__lte=contest.end_at
             ).order_by('submitted_at')
             
             if not submissions.exists():
@@ -154,7 +160,9 @@ class ContestRankingService:
             submissions = Submissions.objects.filter(
                 contest=contest,
                 user=user,
-                problem=contest_problem.problem
+                problem=contest_problem.problem,
+                submitted_at__gte=contest.start_at,
+                submitted_at__lte=contest.end_at
             ).order_by('submitted_at')
 
             if not submissions.exists():
@@ -281,7 +289,9 @@ class ContestRankingService:
             submissions = Submissions.objects.filter(
                 contest=contest,
                 user_id=user_id,
-                problem=contest_problem.problem
+                problem=contest_problem.problem,
+                submitted_at__gte=contest.start_at,
+                submitted_at__lte=contest.end_at
             ).order_by('submitted_at')
             
             if not submissions.exists():
