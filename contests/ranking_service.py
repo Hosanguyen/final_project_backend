@@ -220,13 +220,25 @@ class ContestRankingService:
         
         # Get all active participants for this contest
         if contest.slug == 'practice':
-            # Practice: order by solved_count desc
+            # Practice: order by solved_count desc, submissions asc, then name asc
             participants = ContestParticipant.objects.filter(
                 contest=contest,
                 is_active=True
-            ).select_related('user', 'contest').order_by(
+            ).select_related('user', 'contest').annotate(
+                submissions_count=Count(
+                    'user__submissions__problem',
+                    filter=(
+                        Q(user__submissions__contest=contest) &
+                        Q(user__submissions__submitted_at__gte=contest.start_at) &
+                        Q(user__submissions__submitted_at__lte=contest.end_at)
+                    ),
+                    distinct=True
+                )
+            ).order_by(
                 '-solved_count',
-                'last_submission_at'
+                'submissions_count',
+                'user__full_name',
+                'user__username'
             )
         elif contest.contest_mode == 'ICPC':
             # ICPC: order by solved_count desc, penalty_seconds asc, last_submission_at asc

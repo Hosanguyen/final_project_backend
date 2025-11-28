@@ -981,6 +981,7 @@ class ContestLeaderboardView(APIView):
                 try:
                     # Only compute for practice to avoid heavy queries elsewhere
                     if contest.slug == 'practice':
+                        # Count distinct problems the user has ever submitted within the window
                         attempted_count = Submissions.objects.filter(
                             contest=contest,
                             user=participant.user,
