@@ -33,7 +33,6 @@ from .serializers import (
 )
 from common.authentication import CustomJWTAuthentication
 
-
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
     return {
@@ -85,6 +84,8 @@ class HelloAPIView(APIView):
     permission_classes = [IsAuthenticated]  # bắt buộc phải có token
 
     def get(self, request):
+        if request.user.has_perm('admin', 'users.read'):
+            print("User has users.read permission")
         return Response({
             "message": f"Hello, {request.user.username}! Token của bạn hợp lệ."
         })
@@ -657,12 +658,3 @@ class AllRolesForSelectionView(APIView):
         roles = Role.objects.all().order_by('name')
         serializer = RoleSimpleSerializer(roles, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
-
-class ModelListView(APIView):
-    def get(self, request):
-        hide_apps = ['admin', 'auth', 'contenttypes', 'sessions']
-        models = [
-            model.__name__
-            for model in apps.get_models() if model._meta.app_label not in hide_apps
-        ]
-        return Response(models)

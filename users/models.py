@@ -6,6 +6,7 @@ from django.contrib.auth.hashers import make_password, check_password
 class Role(models.Model):
     id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=50, unique=True)
+    is_default = models.BooleanField(default=False)
     description = models.CharField(max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -103,6 +104,14 @@ class User(models.Model):
             return True
         return False
 
+    def has_perm(self, role_name, perm_code):
+        if not self.has_role(role_name):
+            return False
+        user_permissions = Permission.objects.filter(roles__users=self).values_list('code', flat=True)
+        return perm_code in user_permissions
+    
+    def has_role(self, role_name):
+        return self.roles.filter(name=role_name).exists()
 class UserRole(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, db_column="user_id")
     role = models.ForeignKey(Role, on_delete=models.CASCADE, db_column="role_id")
