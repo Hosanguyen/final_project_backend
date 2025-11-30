@@ -1,0 +1,534 @@
+{
+	"info": {
+		"_postman_id": "quiz-api-collection",
+		"name": "Quizzes API Collection",
+		"description": "Collection để test các API của Quiz System",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"access_token\", jsonData.access);",
+									"    pm.environment.set(\"refresh_token\", jsonData.refresh);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"username\": \"your_username\",\n    \"password\": \"your_password\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/users/login/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "users", "login", ""]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Quiz CRUD",
+			"item": [
+				{
+					"name": "Get All Quizzes",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Quiz",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"title\": \"Sample Quiz 1\",\n    \"description\": \"This is a sample quiz for testing\",\n    \"time_limit_seconds\": 1800,\n    \"is_published\": true,\n    \"questions\": [\n        {\n            \"content\": \"What is 2 + 2?\",\n            \"question_type\": 1,\n            \"points\": 10,\n            \"sequence\": 1,\n            \"options\": [\n                {\n                    \"option_text\": \"3\",\n                    \"is_correct\": false\n                },\n                {\n                    \"option_text\": \"4\",\n                    \"is_correct\": true\n                },\n                {\n                    \"option_text\": \"5\",\n                    \"is_correct\": false\n                },\n                {\n                    \"option_text\": \"6\",\n                    \"is_correct\": false\n                }\n            ]\n        },\n        {\n            \"content\": \"Select all prime numbers\",\n            \"question_type\": 2,\n            \"points\": 15,\n            \"sequence\": 2,\n            \"options\": [\n                {\n                    \"option_text\": \"2\",\n                    \"is_correct\": true\n                },\n                {\n                    \"option_text\": \"3\",\n                    \"is_correct\": true\n                },\n                {\n                    \"option_text\": \"4\",\n                    \"is_correct\": false\n                },\n                {\n                    \"option_text\": \"5\",\n                    \"is_correct\": true\n                }\n            ]\n        }\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Quiz Detail",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/{{quiz_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", "{{quiz_id}}", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Quiz",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"title\": \"Updated Quiz Title\",\n    \"description\": \"Updated description\",\n    \"time_limit_seconds\": 2400,\n    \"is_published\": true,\n    \"questions\": [\n        {\n            \"content\": \"What is 5 + 5?\",\n            \"question_type\": 1,\n            \"points\": 10,\n            \"sequence\": 1,\n            \"options\": [\n                {\n                    \"option_text\": \"8\",\n                    \"is_correct\": false\n                },\n                {\n                    \"option_text\": \"9\",\n                    \"is_correct\": false\n                },\n                {\n                    \"option_text\": \"10\",\n                    \"is_correct\": true\n                },\n                {\n                    \"option_text\": \"11\",\n                    \"is_correct\": false\n                }\n            ]\n        }\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/{{quiz_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", "{{quiz_id}}", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Quiz",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/{{quiz_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", "{{quiz_id}}", ""]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Quiz Submissions",
+			"item": [
+				{
+					"name": "Start Quiz (Create Submission)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"submission_id\", jsonData.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"quiz_id\": {{quiz_id}}\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/submissions/start/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", "submissions", "start", ""]
+						},
+						"description": "Bắt đầu làm quiz. Có thể thêm lesson_id (optional):\n{\n    \"quiz_id\": 1,\n    \"lesson_id\": 5\n}"
+					},
+					"response": []
+				},
+				{
+					"name": "Submit Answer (Single Choice)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"question_id\": 1,\n    \"selected_option_ids\": [2]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/submissions/{{submission_id}}/answer/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", "submissions", "{{submission_id}}", "answer", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Submit Answer (Multiple Choice)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"question_id\": 2,\n    \"selected_option_ids\": [5, 6, 8]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/submissions/{{submission_id}}/answer/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", "submissions", "{{submission_id}}", "answer", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Submit Quiz (Complete)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/submissions/{{submission_id}}/submit/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", "submissions", "{{submission_id}}", "submit", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get All My Submissions",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/submissions/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", "submissions", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Submission Detail",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/submissions/{{submission_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", "submissions", "{{submission_id}}", ""]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Complete Test Flow",
+			"item": [
+				{
+					"name": "1. Create Complete Quiz",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"quiz_id\", jsonData.id);",
+									"    ",
+									"    // Lưu question IDs và option IDs để test",
+									"    if (jsonData.questions && jsonData.questions.length > 0) {",
+									"        pm.environment.set(\"question_1_id\", jsonData.questions[0].id);",
+									"        pm.environment.set(\"correct_option_q1\", jsonData.questions[0].options.find(opt => opt.is_correct).id);",
+									"        ",
+									"        if (jsonData.questions.length > 1) {",
+									"            pm.environment.set(\"question_2_id\", jsonData.questions[1].id);",
+									"            var correctOpts = jsonData.questions[1].options.filter(opt => opt.is_correct).map(opt => opt.id);",
+									"            pm.environment.set(\"correct_options_q2\", JSON.stringify(correctOpts));",
+									"        }",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"title\": \"Python Programming Quiz\",\n    \"description\": \"Test your Python knowledge\",\n    \"time_limit_seconds\": 3600,\n    \"is_published\": true,\n    \"questions\": [\n        {\n            \"content\": \"What is the correct file extension for Python files?\",\n            \"question_type\": 1,\n            \"points\": 10,\n            \"sequence\": 1,\n            \"options\": [\n                {\"option_text\": \".pyth\", \"is_correct\": false},\n                {\"option_text\": \".pt\", \"is_correct\": false},\n                {\"option_text\": \".py\", \"is_correct\": true},\n                {\"option_text\": \".pyt\", \"is_correct\": false}\n            ]\n        },\n        {\n            \"content\": \"Which of the following are valid Python data types?\",\n            \"question_type\": 2,\n            \"points\": 20,\n            \"sequence\": 2,\n            \"options\": [\n                {\"option_text\": \"int\", \"is_correct\": true},\n                {\"option_text\": \"float\", \"is_correct\": true},\n                {\"option_text\": \"string\", \"is_correct\": false},\n                {\"option_text\": \"str\", \"is_correct\": true}\n            ]\n        },\n        {\n            \"content\": \"What keyword is used to define a function in Python?\",\n            \"question_type\": 1,\n            \"points\": 10,\n            \"sequence\": 3,\n            \"options\": [\n                {\"option_text\": \"function\", \"is_correct\": false},\n                {\"option_text\": \"def\", \"is_correct\": true},\n                {\"option_text\": \"func\", \"is_correct\": false},\n                {\"option_text\": \"define\", \"is_correct\": false}\n            ]\n        }\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2. Start Quiz",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"submission_id\", jsonData.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"quiz_id\": {{quiz_id}},\n    \"lesson_id\": 1\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/submissions/start/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", "submissions", "start", ""]
+						},
+						"description": "lesson_id là optional, có thể bỏ nếu không cần"
+					},
+					"response": []
+				},
+				{
+					"name": "3. Answer All Questions",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"question_id\": {{question_1_id}},\n    \"selected_option_ids\": [{{correct_option_q1}}]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/submissions/{{submission_id}}/answer/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", "submissions", "{{submission_id}}", "answer", ""]
+						},
+						"description": "Note: Bạn cần chạy request này nhiều lần cho từng câu hỏi, thay đổi question_id và selected_option_ids"
+					},
+					"response": []
+				},
+				{
+					"name": "4. Complete Quiz",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/submissions/{{submission_id}}/submit/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", "submissions", "{{submission_id}}", "submit", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "5. View Results",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/quizzes/submissions/{{submission_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "quizzes", "submissions", "{{submission_id}}", ""]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "quiz_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "submission_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "question_1_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "question_2_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "correct_option_q1",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "correct_options_q2",
+			"value": "",
+			"type": "string"
+		}
+	]
+}
