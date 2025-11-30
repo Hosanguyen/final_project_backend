@@ -87,12 +87,22 @@ class ContestRankingService:
         2. Penalty = time to AC + (wrong submissions * penalty_time)
         3. Time is calculated from contest start to first AC
         4. Only AC problems contribute to penalty
+        5. During freeze: submissions after freeze_rankings_at are excluded from ranking
+        6. After contest ends: all submissions are counted
         """
+        from django.utils import timezone
+        
         contest_problems = ContestProblem.objects.filter(contest=contest)
         
         solved_count = 0
         total_penalty_minutes = 0
         last_submission_time = None
+        
+        # Determine if we should apply freeze
+        # Only apply freeze if contest is still running and freeze_time exists
+        now = timezone.now()
+        freeze_time = contest.freeze_rankings_at
+        should_apply_freeze = freeze_time and now < contest.end_at
         
         for contest_problem in contest_problems:
             # Get all submissions for this problem by this user
@@ -107,8 +117,15 @@ class ContestRankingService:
             if not submissions.exists():
                 continue
             
-            # Find first AC submission
-            first_ac = submissions.filter(
+            # Separate frozen and unfrozen submissions only if freeze is active
+            if should_apply_freeze:
+                unfrozen_submissions = submissions.filter(submitted_at__lt=freeze_time)
+            else:
+                # After contest ends, count all submissions
+                unfrozen_submissions = submissions
+            
+            # Find first AC submission (in unfrozen period during freeze, all submissions after contest)
+            first_ac = unfrozen_submissions.filter(
                 status__in=['AC', 'correct', 'Correct']
             ).first()
             
@@ -118,8 +135,8 @@ class ContestRankingService:
                 # Calculate time from contest start to AC (in minutes)
                 time_to_ac = (first_ac.submitted_at - contest.start_at).total_seconds() / 60
                 
-                # Count wrong submissions before first AC
-                wrong_count = submissions.filter(
+                # Count wrong submissions before first AC (only unfrozen during freeze, all after contest)
+                wrong_count = unfrozen_submissions.filter(
                     submitted_at__lt=first_ac.submitted_at
                 ).exclude(
                     status__in=['AC', 'correct', 'Correct']
@@ -129,9 +146,9 @@ class ContestRankingService:
                 problem_penalty = time_to_ac + (wrong_count * contest.penalty_time)
                 total_penalty_minutes += problem_penalty
             
-            # Track last submission
-            last_sub = submissions.last()
-            if not last_submission_time or last_sub.submitted_at > last_submission_time:
+            # Track last submission (only unfrozen during freeze, all after contest)
+            last_sub = unfrozen_submissions.last() if should_apply_freeze else submissions.last()
+            if last_sub and (not last_submission_time or last_sub.submitted_at > last_submission_time):
                 last_submission_time = last_sub.submitted_at
         
         participant.solved_count = solved_count
@@ -281,13 +298,15 @@ class ContestRankingService:
         Returns dict: {
             problem_id: {
                 'status': 'AC'/'WA'/'pending'/None,
-                'attempts': number of submissions,
+                'attempts': number of submissions (unfrozen only during freeze, all after contest),
+                'frozen_attempts': number of submissions during freeze (0 after contest ends),
                 'time_minutes': time to AC in minutes (from contest start),
                 'penalty': penalty time for this problem
             }
         }
         """
         from contests.models import Contest, ContestProblem
+        from django.utils import timezone
         
         try:
             contest = Contest.objects.get(id=contest_id)
@@ -296,6 +315,11 @@ class ContestRankingService:
         
         contest_problems = ContestProblem.objects.filter(contest=contest).order_by('label')
         problem_details = {}
+        
+        # Determine if we should apply freeze
+        now = timezone.now()
+        freeze_time = contest.freeze_rankings_at
+        should_apply_freeze = freeze_time and now < contest.end_at
         
         for contest_problem in contest_problems:
             submissions = Submissions.objects.filter(
@@ -311,6 +335,7 @@ class ContestRankingService:
                     'problem_label': contest_problem.label,
                     'status': None,
                     'attempts': 0,
+                    'frozen_attempts': 0,
                     'time_minutes': None,
                     'penalty': 0,
                     'score': None,
@@ -319,19 +344,29 @@ class ContestRankingService:
                 }
                 continue
             
-            # Find first AC
-            first_ac = submissions.filter(
+            # Separate frozen and unfrozen submissions only if freeze is active
+            if should_apply_freeze:
+                unfrozen_submissions = submissions.filter(submitted_at__lt=freeze_time)
+                frozen_submissions = submissions.filter(submitted_at__gte=freeze_time)
+                frozen_count = frozen_submissions.count()
+            else:
+                # After contest ends, all submissions are unfrozen
+                unfrozen_submissions = submissions
+                frozen_count = 0
+            
+            # Find first AC (in unfrozen period during freeze, all submissions after contest)
+            first_ac = unfrozen_submissions.filter(
                 status__in=['AC', 'correct', 'Correct']
             ).first()
             
-            total_attempts = submissions.count()
+            unfrozen_count = unfrozen_submissions.count()
             
             if first_ac:
                 # Calculate time to AC
                 time_to_ac_minutes = int((first_ac.submitted_at - contest.start_at).total_seconds() / 60)
                 
                 # Count wrong submissions before AC
-                wrong_before_ac = submissions.filter(
+                wrong_before_ac = unfrozen_submissions.filter(
                     submitted_at__lt=first_ac.submitted_at
                 ).exclude(
                     status__in=['AC', 'correct', 'Correct']
@@ -340,7 +375,8 @@ class ContestRankingService:
                 problem_details[contest_problem.problem.id] = {
                     'problem_label': contest_problem.label,
                     'status': 'AC',
-                    'attempts': total_attempts,
+                    'attempts': unfrozen_count,
+                    'frozen_attempts': frozen_count,
                     'wrong_attempts': wrong_before_ac,
                     'time_minutes': time_to_ac_minutes,
                     'penalty': time_to_ac_minutes + (wrong_before_ac * contest.penalty_time),
@@ -349,8 +385,8 @@ class ContestRankingService:
                     'test_total': first_ac.test_total
                 }
             else:
-                # No AC, check if there are wrong submissions
-                has_wrong = submissions.exclude(
+                # No AC in unfrozen period
+                has_wrong = unfrozen_submissions.exclude(
                     status__in=['AC', 'correct', 'Correct']
                 ).exists()
                 
@@ -359,8 +395,9 @@ class ContestRankingService:
                 problem_details[contest_problem.problem.id] = {
                     'problem_label': contest_problem.label,
                     'status': 'WA' if has_wrong else 'pending',
-                    'attempts': total_attempts,
-                    'wrong_attempts': total_attempts,
+                    'attempts': unfrozen_count,
+                    'frozen_attempts': frozen_count,
+                    'wrong_attempts': unfrozen_count,
                     'time_minutes': None,
                     'penalty': 0,
                     'score': last_submission.score if contest.contest_mode == 'OI' else None,
