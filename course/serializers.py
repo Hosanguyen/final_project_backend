@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Language, Tag, File, Course, Lesson, LessonResource, Enrollment
+from .models import Language, Tag, File, Course, Lesson, LessonResource, Enrollment, Order
 
 class LanguageSerializer(serializers.ModelSerializer):
     class Meta:
@@ -123,3 +123,26 @@ class EnrollmentSerializer(serializers.ModelSerializer):
             'enrolled_at', 'progress_percent', 'last_accessed_at'
         ]
         read_only_fields = ['id', 'enrolled_at']
+
+
+class OrderSerializer(serializers.ModelSerializer):
+    course_title = serializers.CharField(source='course.title', read_only=True)
+    course_slug = serializers.CharField(source='course.slug', read_only=True)
+    user_name = serializers.CharField(source='user.username', read_only=True)
+    user_email = serializers.CharField(source='user.email', read_only=True)
+    
+    class Meta:
+        model = Order
+        fields = [
+            'id', 'user', 'course', 'order_code', 'amount', 'status',
+            'vnp_txn_ref', 'vnp_transaction_no', 'vnp_response_code',
+            'vnp_bank_code', 'vnp_pay_date', 'payment_method', 'metadata',
+            'created_at', 'updated_at', 'completed_at',
+            'course_title', 'course_slug', 'user_name', 'user_email'
+        ]
+        read_only_fields = [
+            'id', 'order_code', 'vnp_txn_ref', 'vnp_transaction_no',
+            'vnp_response_code', 'vnp_bank_code', 'vnp_pay_date',
+            'created_at', 'updated_at', 'completed_at'
+        ]
+

@@ -4,7 +4,9 @@ from .views import (
     CourseView, CourseDetailView,
     LessonView, LessonDetailView,
     LessonResourceView, LessonResourceDetailView,
-    TagView, TagDetailView
+    TagView, TagDetailView,
+    CreatePaymentView, VNPayReturnView, CheckPaymentStatusView,
+    OrderHistoryView, CheckEnrollmentView, EnrollmentListView
 )
 
 urlpatterns = [
@@ -28,4 +30,14 @@ urlpatterns = [
     # Tag URLs
     path("tags/", TagView.as_view(), name="tag-list-create"),
     path("tags/<int:pk>/", TagDetailView.as_view(), name="tag-detail"),
+    
+    # Payment URLs
+    path("payment/create/", CreatePaymentView.as_view(), name="create-payment"),
+    path("payment/vnpay/return/", VNPayReturnView.as_view(), name="vnpay-return"),
+    path("payment/status/<str:order_code>/", CheckPaymentStatusView.as_view(), name="check-payment-status"),
+    path("payment/history/", OrderHistoryView.as_view(), name="order-history"),
+    
+    # Enrollment URLs
+    path("enrollment/check/<int:course_id>/", CheckEnrollmentView.as_view(), name="check-enrollment"),
+    path("enrollment/list/", EnrollmentListView.as_view(), name="enrollment-list"),
 ]

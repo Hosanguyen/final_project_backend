@@ -4,13 +4,18 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q
 from django.utils import timezone
+from django.db import transaction
+from django.shortcuts import redirect
+from django.http import HttpResponse
+import uuid
 
 from common.authentication import CustomJWTAuthentication
-from .models import Language, Course, Lesson, LessonResource, Tag, File
+from .models import Language, Course, Lesson, LessonResource, Tag, File, Order, Enrollment
 from .serializers import (
     LanguageSerializer, CourseSerializer, LessonSerializer, 
-    LessonResourceSerializer, TagSerializer, FileSerializer
+    LessonResourceSerializer, TagSerializer, FileSerializer, OrderSerializer, EnrollmentSerializer
 )
+from .vnpay_service import VNPayService
 
 
 class LanguageView(APIView):
@@ -517,3 +522,257 @@ class TagDetailView(APIView):
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         tag.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ===== Payment Views =====
+
+class CreatePaymentView(APIView):
+    """Tạo URL thanh toán VNPay cho khóa học"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        """
+        Tạo đơn hàng và URL thanh toán VNPay
+        Body: {
+            "course_id": int,
+            "return_url": string (optional) - URL frontend để redirect sau khi thanh toán
+        }
+        """
+        course_id = request.data.get('course_id')
+        frontend_return_url = request.data.get('return_url', '')
+        
+        if not course_id:
+            return Response(
+                {"error": "course_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            course = Course.objects.get(id=course_id, is_published=True)
+        except Course.DoesNotExist:
+            return Response(
+                {"error": "Course not found or not published"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Kiểm tra user đã đăng ký chưa
+        if Enrollment.objects.filter(user=request.user, course=course).exists():
+            return Response(
+                {"error": "You have already enrolled in this course"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Kiểm tra khóa học miễn phí
+        if course.price <= 0:
+            # Tạo enrollment trực tiếp cho khóa học miễn phí
+            enrollment = Enrollment.objects.create(
+                user=request.user,
+                course=course
+            )
+            return Response({
+                "message": "Successfully enrolled in free course",
+                "enrollment_id": enrollment.id,
+                "is_free": True
+            }, status=status.HTTP_201_CREATED)
+        
+        # Tạo mã đơn hàng unique
+        order_code = f"ORDER{uuid.uuid4().hex[:12].upper()}"
+        
+        # Tạo order
+        order = Order.objects.create(
+            user=request.user,
+            course=course,
+            order_code=order_code,
+            amount=course.price,
+            status='pending',
+            metadata={
+                'frontend_return_url': frontend_return_url
+            }
+        )
+        
+        # Tạo URL thanh toán VNPay
+        vnpay_service = VNPayService()
+        
+        # Lấy IP address
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            ip_addr = x_forwarded_for.split(',')[0]
+        else:
+            ip_addr = request.META.get('REMOTE_ADDR', '127.0.0.1')
+        
+        # Tạo mô tả đơn hàng - Loại bỏ ký tự đặc biệt cho VNPay
+        # VNPay chỉ chấp nhận: a-z, A-Z, 0-9, space
+        import re
+        safe_course_title = re.sub(r'[^a-zA-Z0-9 ]', '', course.title)
+        # Thay space bằng underscore hoặc hyphen để tránh lỗi encoding
+        safe_course_title = safe_course_title.replace(' ', '_')
+        order_desc = f"Thanh_toan_khoa_hoc_{safe_course_title}"
+        # Giới hạn độ dài (VNPay max 255 chars)
+        order_desc = order_desc[:255]
+        
+        payment_url = vnpay_service.create_payment_url(
+            order_code=order_code,
+            amount=float(order.amount),
+            order_desc=order_desc,
+            ip_addr=ip_addr,
+            locale='vn'
+        )
+        
+        return Response({
+            "order_id": order.id,
+            "order_code": order.order_code,
+            "amount": order.amount,
+            "payment_url": payment_url,
+            "course": {
+                "id": course.id,
+                "title": course.title,
+                "slug": course.slug
+            }
+        }, status=status.HTTP_201_CREATED)
+
+
+class VNPayReturnView(APIView):
+    """Xử lý callback từ VNPay sau khi thanh toán"""
+    authentication_classes = []  # Không cần authentication vì đây là callback từ VNPay
+    permission_classes = []
+
+    def get(self, request):
+        """
+        VNPay sẽ redirect về URL này với các tham số:
+        - vnp_TxnRef: Mã đơn hàng
+        - vnp_ResponseCode: Mã phản hồi (00 = thành công)
+        - vnp_TransactionNo: Mã giao dịch tại VNPay
+        - vnp_SecureHash: Chữ ký để xác thực
+        - ...
+        """
+        query_params = request.query_params.dict()
+        
+        vnpay_service = VNPayService()
+        
+        # Xác thực response từ VNPay
+        is_valid, response_code, txn_ref = vnpay_service.validate_response(query_params)
+        
+        if not is_valid:
+            return Response(
+                {"error": "Invalid signature from VNPay"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Lấy order
+        try:
+            order = Order.objects.get(order_code=txn_ref)
+        except Order.DoesNotExist:
+            return Response(
+                {"error": "Order not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Cập nhật thông tin order
+        order.vnp_txn_ref = query_params.get('vnp_TxnRef', '')
+        order.vnp_transaction_no = query_params.get('vnp_TransactionNo', '')
+        order.vnp_response_code = response_code
+        order.vnp_bank_code = query_params.get('vnp_BankCode', '')
+        order.vnp_pay_date = query_params.get('vnp_PayDate', '')
+        
+        # Kiểm tra thanh toán thành công
+        if vnpay_service.is_success_response(response_code):
+            with transaction.atomic():
+                # Cập nhật order status
+                order.status = 'completed'
+                order.completed_at = timezone.now()
+                order.save()
+                
+                # Tạo enrollment
+                enrollment, created = Enrollment.objects.get_or_create(
+                    user=order.user,
+                    course=order.course
+                )
+        else:
+            order.status = 'failed'
+            order.save()
+        
+        # Redirect về frontend
+        frontend_return_url = order.metadata.get('frontend_return_url', '') if order.metadata else ''
+        
+        if frontend_return_url:
+            # Thêm params vào URL frontend
+            separator = '&' if '?' in frontend_return_url else '?'
+            redirect_url = f"{frontend_return_url}{separator}order_code={order.order_code}&status={order.status}"
+            return redirect(redirect_url)
+        
+        # Nếu không có frontend URL, trả về JSON
+        return Response({
+            "order_code": order.order_code,
+            "status": order.status,
+            "response_code": response_code,
+            "message": "Payment successful" if order.status == 'completed' else "Payment failed"
+        })
+
+
+class CheckPaymentStatusView(APIView):
+    """Kiểm tra trạng thái thanh toán"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, order_code):
+        """
+        Kiểm tra trạng thái đơn hàng
+        URL: /api/payment/status/<order_code>/
+        """
+        try:
+            order = Order.objects.get(order_code=order_code, user=request.user)
+        except Order.DoesNotExist:
+            return Response(
+                {"error": "Order not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        serializer = OrderSerializer(order)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class OrderHistoryView(APIView):
+    """Lấy lịch sử đơn hàng của user"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Lấy danh sách orders của user hiện tại"""
+        orders = Order.objects.filter(user=request.user).select_related('course')
+        serializer = OrderSerializer(orders, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class CheckEnrollmentView(APIView):
+    """Kiểm tra xem user đã đăng ký khóa học chưa"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, course_id):
+        """
+        Kiểm tra enrollment
+        URL: /api/enrollment/check/<course_id>/
+        """
+        is_enrolled = Enrollment.objects.filter(
+            user=request.user,
+            course_id=course_id
+        ).exists()
+        
+        return Response({
+            "is_enrolled": is_enrolled,
+            "course_id": course_id
+        }, status=status.HTTP_200_OK)
+
+
+class EnrollmentListView(APIView):
+    """Quản lý enrollments"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Lấy danh sách khóa học đã đăng ký của user"""
+        enrollments = Enrollment.objects.filter(user=request.user).select_related('course')
+        serializer = EnrollmentSerializer(enrollments, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+

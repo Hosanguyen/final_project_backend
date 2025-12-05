@@ -209,3 +209,10 @@ MEDIA_ROOT = BASE_DIR / "media"
 DOMJUDGE_API_URL = os.getenv('DOMJUDGE_API_URL', 'http://localhost:8080/api/v4')
 DOMJUDGE_USERNAME = os.getenv('DOMJUDGE_USERNAME', 'admin')
 DOMJUDGE_PASSWORD = os.getenv('DOMJUDGE_PASSWORD', '12345')
+
+# VNPay Configuration
+VNPAY_TMN_CODE = os.getenv('VNPAY_TMN_CODE', '')  # Mã website tại VNPay
+VNPAY_HASH_SECRET = os.getenv('VNPAY_HASH_SECRET', '')  # Secret key
+VNPAY_URL = os.getenv('VNPAY_URL', 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html')  # URL thanh toán VNPay
+VNPAY_RETURN_URL = os.getenv('VNPAY_RETURN_URL', 'https://josephine-unsurmising-importantly.ngrok-free.dev/api/payment/vnpay/return/')  # URL callback từ VNPay
+VNPAY_API_URL = os.getenv('VNPAY_API_URL', 'https://sandbox.vnpayment.vn/merchant_webapi/api/transaction')  # URL API VNPay
