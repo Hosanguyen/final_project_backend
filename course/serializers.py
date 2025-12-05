@@ -32,6 +32,7 @@ class CourseSerializer(serializers.ModelSerializer):
         required=False
     )
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    created_by_full_name = serializers.SerializerMethodField()
     updated_by_name = serializers.CharField(source='updated_by.username', read_only=True)
     lessons_count = serializers.SerializerMethodField()
     enrollments_count = serializers.SerializerMethodField()
@@ -41,8 +42,8 @@ class CourseSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'slug', 'title', 'short_description', 'long_description',
             'languages', 'tags', 'level', 'price', 'is_published', 
-            'published_at', 'created_by', 'created_by_name', 'created_at',
-            'updated_at', 'updated_by', 'updated_by_name', 'language_ids',
+            'published_at', 'created_by', 'created_by_name', 'created_by_full_name',
+            'created_at', 'updated_at', 'updated_by', 'updated_by_name', 'language_ids',
             'tag_ids', 'lessons_count', 'enrollments_count'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'published_at']
@@ -52,6 +53,11 @@ class CourseSerializer(serializers.ModelSerializer):
     
     def get_enrollments_count(self, obj):
         return obj.enrollments.count()
+    
+    def get_created_by_full_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.full_name or obj.created_by.username
+        return None
     
     def create(self, validated_data):
         language_ids = validated_data.pop('language_ids', [])
