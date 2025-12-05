@@ -121,6 +121,7 @@ class LessonSerializer(serializers.ModelSerializer):
 class EnrollmentSerializer(serializers.ModelSerializer):
     course_title = serializers.CharField(source='course.title', read_only=True)
     user_name = serializers.CharField(source='user.username', read_only=True)
+    course = CourseSerializer(read_only=True)
     
     class Meta:
         model = Enrollment
