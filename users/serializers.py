@@ -31,9 +31,25 @@ class AdminUpdateUserSerializer(serializers.ModelSerializer):
         fields = ["email", "full_name", "avatar_url", "description", "dob", "gender", "phone", "address"]
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    roles = serializers.SerializerMethodField()
+    permissions = serializers.SerializerMethodField()
+    
     class Meta:
         model = User
-        fields = ["id", "username", "email", "full_name", "avatar_url", "description", "dob", "gender", "phone", "address"]
+        fields = ["id", "username", "email", "full_name", "avatar_url", "description", 
+                  "dob", "gender", "phone", "address", "roles", "permissions"]
+    
+    def get_roles(self, obj):
+        """Trả về danh sách roles của user"""
+        return [{"id": role.id, "name": role.name} for role in obj.roles.all()]
+    
+    def get_permissions(self, obj):
+        """Trả về danh sách permissions của user từ các roles"""
+        permissions = set()
+        for role in obj.roles.all():
+            for perm in role.permissions.all():
+                permissions.add(perm.code)
+        return list(permissions)
 
 class UserResetPasswordSerializer(serializers.ModelSerializer):
     class Meta:
