@@ -188,3 +188,22 @@ class Order(models.Model):
 
     def __str__(self):
         return f"Order {self.order_code} - {self.user.username} - {self.course.title}"
+
+
+class LessonQuiz(models.Model):
+    """Bảng trung gian giữa Lesson và Quiz"""
+    id = models.BigAutoField(primary_key=True)
+    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="lesson_quizzes")
+    quiz = models.ForeignKey('quizzes.Quiz', on_delete=models.CASCADE, related_name="lesson_quizzes")
+    sequence = models.IntegerField(default=0, verbose_name="Thứ tự quiz trong lesson")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "lesson_quizzes"
+        verbose_name = "Lesson Quiz"
+        verbose_name_plural = "Lesson Quizzes"
+        ordering = ["lesson", "sequence"]
+        unique_together = ("lesson", "quiz")
+
+    def __str__(self):
+        return f"{self.lesson.title} - Quiz: {self.quiz.title}"

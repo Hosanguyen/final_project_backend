@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Language, Tag, File, Course, Lesson, LessonResource, Enrollment, Order
+from .models import Language, Tag, File, Course, Lesson, LessonResource, Enrollment, LessonQuiz
 
 class LanguageSerializer(serializers.ModelSerializer):
     class Meta:
@@ -99,16 +100,35 @@ class LessonResourceSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
+class LessonQuizSerializer(serializers.ModelSerializer):
+    quiz_title = serializers.CharField(source='quiz.title', read_only=True)
+    quiz_description = serializers.CharField(source='quiz.description', read_only=True)
+    quiz_time_limit = serializers.IntegerField(source='quiz.time_limit_seconds', read_only=True)
+    
+    class Meta:
+        model = LessonQuiz
+        fields = ['id', 'lesson', 'quiz', 'quiz_title', 'quiz_description', 'quiz_time_limit', 'sequence', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
 class LessonSerializer(serializers.ModelSerializer):
     resources = LessonResourceSerializer(many=True, read_only=True)
+    quizzes = LessonQuizSerializer(source='lesson_quizzes', many=True, read_only=True)
     course_title = serializers.SerializerMethodField()
     resources_count = serializers.SerializerMethodField()
+    quizzes_count = serializers.SerializerMethodField()
+    quiz_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        help_text="Danh sách ID của các quiz đã có"
+    )
     
     class Meta:
         model = Lesson
         fields = [
             'id', 'course', 'course_title', 'title', 'description', 
-            'sequence', 'created_at', 'updated_at', 'resources', 'resources_count'
+            'sequence', 'created_at', 'updated_at', 'resources', 'resources_count',
+            'quizzes', 'quizzes_count', 'quiz_ids'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
     
@@ -117,6 +137,47 @@ class LessonSerializer(serializers.ModelSerializer):
     
     def get_resources_count(self, obj):
         return obj.resources.count()
+    
+    def get_quizzes_count(self, obj):
+        return obj.lesson_quizzes.count()
+    
+    def create(self, validated_data):
+        quiz_ids = validated_data.pop('quiz_ids', [])
+        lesson = Lesson.objects.create(**validated_data)
+        
+        # Tạo LessonQuiz cho các quiz được chọn
+        if quiz_ids:
+            for index, quiz_id in enumerate(quiz_ids):
+                LessonQuiz.objects.create(
+                    lesson=lesson,
+                    quiz_id=quiz_id,
+                    sequence=index + 1
+                )
+        
+        return lesson
+    
+    def update(self, instance, validated_data):
+        quiz_ids = validated_data.pop('quiz_ids', None)
+        
+        # Cập nhật các trường cơ bản
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        # Cập nhật quizzes nếu có
+        if quiz_ids is not None:
+            # Xóa tất cả LessonQuiz cũ
+            instance.lesson_quizzes.all().delete()
+            
+            # Tạo LessonQuiz mới
+            for index, quiz_id in enumerate(quiz_ids):
+                LessonQuiz.objects.create(
+                    lesson=instance,
+                    quiz_id=quiz_id,
+                    sequence=index + 1
+                )
+        
+        return instance
 
 class EnrollmentSerializer(serializers.ModelSerializer):
     course_title = serializers.CharField(source='course.title', read_only=True)

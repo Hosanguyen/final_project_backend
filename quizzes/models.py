@@ -13,12 +13,6 @@ class Quiz(models.Model):
         verbose_name="Thời gian làm bài (giây)"
     )
     is_published = models.BooleanField(default=False, verbose_name="Đã công khai")
-    lessons = models.ManyToManyField(
-        Lesson,
-        related_name='quizzes',
-        blank=True,
-        verbose_name="Các bài học"
-    )
     created_by = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
