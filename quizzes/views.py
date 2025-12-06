@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.core.paginator import Paginator
 import json
 
 from common.authentication import CustomJWTAuthentication
@@ -28,8 +29,40 @@ class QuizListView(APIView):
 
     def get(self, request):
         quizzes = Quiz.objects.all().order_by('-created_at')
-        serializer = QuizListSerializer(quizzes, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        # Filter by published status
+        is_published = request.query_params.get('is_published')
+        if is_published is not None and is_published.lower() in ['true', 'false']:
+            quizzes = quizzes.filter(is_published=is_published.lower() == 'true')
+        
+        # Search by title
+        search = request.query_params.get('search')
+        if search:
+            quizzes = quizzes.filter(title__icontains=search)
+        
+        # Pagination
+        page = request.query_params.get('page', 1)
+        page_size = request.query_params.get('page_size', 10)
+        
+        try:
+            page = int(page)
+            page_size = int(page_size)
+        except ValueError:
+            page = 1
+            page_size = 10
+        
+        paginator = Paginator(quizzes, page_size)
+        page_obj = paginator.get_page(page)
+        
+        serializer = QuizListSerializer(page_obj, many=True)
+        
+        return Response({
+            'count': paginator.count,
+            'total_pages': paginator.num_pages,
+            'current_page': page,
+            'page_size': page_size,
+            'results': serializer.data
+        }, status=status.HTTP_200_OK)
 
     def post(self, request):
         serializer = QuizCreateSerializer(data=request.data)
@@ -313,7 +346,7 @@ class QuizSubmissionSubmitView(APIView):
 
 class QuizSubmissionListView(APIView):
     """
-    GET: Lấy danh sách submissions của user
+    GET: Lấy danh sách submissions của user (có phân trang)
     """
     authentication_classes = [CustomJWTAuthentication]
 
@@ -322,8 +355,44 @@ class QuizSubmissionListView(APIView):
             user=request.user
         ).order_by('-started_at')
 
-        serializer = QuizSubmissionSerializer(submissions, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        # Filter by quiz_id
+        quiz_id = request.query_params.get('quiz_id')
+        if quiz_id:
+            submissions = submissions.filter(quiz_id=quiz_id)
+        
+        # Filter by status
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            submissions = submissions.filter(status=status_filter)
+        
+        # Filter by lesson_id
+        lesson_id = request.query_params.get('lesson_id')
+        if lesson_id:
+            submissions = submissions.filter(lesson_id=lesson_id)
+
+        # Pagination
+        page = request.query_params.get('page', 1)
+        page_size = request.query_params.get('page_size', 10)
+        
+        try:
+            page = int(page)
+            page_size = int(page_size)
+        except ValueError:
+            page = 1
+            page_size = 10
+        
+        paginator = Paginator(submissions, page_size)
+        page_obj = paginator.get_page(page)
+        
+        serializer = QuizSubmissionSerializer(page_obj, many=True)
+        
+        return Response({
+            'count': paginator.count,
+            'total_pages': paginator.num_pages,
+            'current_page': page,
+            'page_size': page_size,
+            'results': serializer.data
+        }, status=status.HTTP_200_OK)
 
 
 class QuizSubmissionDetailView(APIView):

@@ -6,7 +6,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from common.authentication import CustomJWTAuthentication
-from .models import Language, Course, Lesson, LessonResource, Tag, File
+from .models import Language, Course, Lesson, LessonResource, Tag, File, LessonQuiz
 from .serializers import (
     LanguageSerializer, CourseSerializer, LessonSerializer, 
     LessonResourceSerializer, TagSerializer, FileSerializer
@@ -211,7 +211,7 @@ class LessonView(APIView):
 
     def get(self, request):
         """Lấy danh sách lessons"""
-        lessons = Lesson.objects.select_related('course').prefetch_related('resources')
+        lessons = Lesson.objects.select_related('course').prefetch_related('resources', 'lesson_quizzes__quiz')
         
         # Filter by course (support both course_id and course)
         course_id = request.query_params.get('course_id') or request.query_params.get('course')
@@ -254,7 +254,7 @@ class LessonDetailView(APIView):
     def get(self, request, pk):
         """Lấy chi tiết lesson"""
         try:
-            lesson = Lesson.objects.select_related('course').prefetch_related('resources__file').get(pk=pk)
+            lesson = Lesson.objects.select_related('course').prefetch_related('resources__file', 'lesson_quizzes__quiz').get(pk=pk)
         except Lesson.DoesNotExist:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         
