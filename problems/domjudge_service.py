@@ -176,19 +176,18 @@ timelimit: {problem.time_limit_ms / 1000}
     def _upload_to_domjudge(self, problem, zip_file):
         """Upload problem ZIP lên DOMjudge qua API"""
         
-        # Nếu đã có domjudge_problem_id, update thay vì create
+        url = f"{self.api_url}/problems"
+        method = 'POST'
+
         if problem.domjudge_problem_id:
-            # Update existing problem
-            url = f"{self.api_url}/problems/{problem.domjudge_problem_id}"
-            method = 'PUT'
+            files = {'problem': (None, problem.domjudge_problem_id)}
         else:
-            # Create new problem
-            url = f"{self.api_url}/problems"
-            method = 'POST'
+            files = {}
         
         with open(zip_file.storage_key.path, 'rb') as f:
-            files = {'zip': (zip_file.filename, f, 'application/zip')}
-            
+            # files = {'zip': (zip_file.filename, f, 'application/zip')}
+            files['zip'] = (zip_file.filename, f, 'application/zip')
+
             response = requests.request(
                 method=method,
                 url=url,
