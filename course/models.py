@@ -152,6 +152,44 @@ class Enrollment(models.Model):
         return f"{self.user} → {self.course}"
 
 
+class Order(models.Model):
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+        ("cancelled", "Cancelled"),
+    ]
+    
+    id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="orders")
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="orders")
+    order_code = models.CharField(max_length=50, unique=True, help_text="Mã đơn hàng duy nhất")
+    amount = models.DecimalField(max_digits=10, decimal_places=2, help_text="Số tiền thanh toán")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    
+    # VNPay transaction info
+    vnp_txn_ref = models.CharField(max_length=100, null=True, blank=True, help_text="Mã tham chiếu giao dịch VNPay")
+    vnp_transaction_no = models.CharField(max_length=100, null=True, blank=True, help_text="Mã giao dịch tại VNPay")
+    vnp_response_code = models.CharField(max_length=10, null=True, blank=True, help_text="Mã phản hồi từ VNPay")
+    vnp_bank_code = models.CharField(max_length=20, null=True, blank=True, help_text="Mã ngân hàng")
+    vnp_pay_date = models.CharField(max_length=14, null=True, blank=True, help_text="Thời gian thanh toán")
+    
+    # Additional info
+    payment_method = models.CharField(max_length=50, default="vnpay", help_text="Phương thức thanh toán")
+    metadata = models.JSONField(null=True, blank=True, help_text="Thông tin bổ sung")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True, help_text="Thời gian hoàn thành thanh toán")
+
+    class Meta:
+        db_table = "orders"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Order {self.order_code} - {self.user.username} - {self.course.title}"
+
+
 class LessonQuiz(models.Model):
     """Bảng trung gian giữa Lesson và Quiz"""
     id = models.BigAutoField(primary_key=True)

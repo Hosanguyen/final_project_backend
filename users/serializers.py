@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, PermissionCategory, Permission, Role, UserRole
+from .models import User, PermissionCategory, Permission, Role, UserRole, ContestRatingChange
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
@@ -31,9 +31,25 @@ class AdminUpdateUserSerializer(serializers.ModelSerializer):
         fields = ["email", "full_name", "avatar_url", "description", "dob", "gender", "phone", "address"]
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    roles = serializers.SerializerMethodField()
+    permissions = serializers.SerializerMethodField()
+    
     class Meta:
         model = User
-        fields = ["id", "username", "email", "full_name", "avatar_url", "description", "dob", "gender", "phone", "address"]
+        fields = ["id", "username", "email", "full_name", "avatar_url", "description", 
+                  "dob", "gender", "phone", "address", "roles", "permissions"]
+    
+    def get_roles(self, obj):
+        """Trả về danh sách roles của user"""
+        return [{"id": role.id, "name": role.name} for role in obj.roles.all()]
+    
+    def get_permissions(self, obj):
+        """Trả về danh sách permissions của user từ các roles"""
+        permissions = set()
+        for role in obj.roles.all():
+            for perm in role.permissions.all():
+                permissions.add(perm.code)
+        return list(permissions)
 
 class UserResetPasswordSerializer(serializers.ModelSerializer):
     class Meta:
@@ -332,3 +348,83 @@ class RemoveRolesFromUserSerializer(serializers.Serializer):
         child=serializers.IntegerField(),
         required=True
     )
+
+
+# ============= RATING SERIALIZERS =============
+
+class UserRatingSerializer(serializers.ModelSerializer):
+    """Serializer cho User rating information"""
+    rank_color = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'full_name', 'avatar_url',
+            'current_rating', 'max_rating', 'rank', 'max_rank', 'rank_color',
+            'contests_participated', 'contests_won', 'total_problems_solved',
+            'last_contest_at'
+        ]
+        read_only_fields = [
+            'id', 'current_rating', 'max_rating', 'rank', 'max_rank',
+            'contests_participated', 'contests_won', 'total_problems_solved',
+            'last_contest_at'
+        ]
+    
+    def get_rank_color(self, obj):
+        return User.get_rank_color(obj.rank)
+
+
+class UserRatingSimpleSerializer(serializers.ModelSerializer):
+    """Serializer đơn giản cho rating trong user profile"""
+    rank_color = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = [
+            'current_rating', 'max_rating', 'rank', 'max_rank', 'rank_color',
+            'contests_participated', 'total_problems_solved'
+        ]
+    
+    def get_rank_color(self, obj):
+        return User.get_rank_color(obj.rank)
+
+
+class ContestRatingChangeSerializer(serializers.ModelSerializer):
+    """Serializer cho lịch sử thay đổi rating"""
+    contest_title = serializers.CharField(source='contest.title', read_only=True)
+    contest_slug = serializers.CharField(source='contest.slug', read_only=True)
+    rating_change_display = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ContestRatingChange
+        fields = [
+            'id', 'contest', 'contest_title', 'contest_slug',
+            'old_rating', 'new_rating', 'rating_change', 'rating_change_display',
+            'rank', 'solved_count', 'created_at'
+        ]
+        read_only_fields = [
+            'id', 'old_rating', 'new_rating', 'rating_change',
+            'rank', 'solved_count', 'created_at'
+        ]
+    
+    def get_rating_change_display(self, obj):
+        """Format rating change with + or - sign"""
+        if obj.rating_change >= 0:
+            return f"+{obj.rating_change}"
+        return str(obj.rating_change)
+
+
+class GlobalRankingSerializer(serializers.Serializer):
+    """Serializer cho global ranking leaderboard"""
+    rank = serializers.IntegerField()
+    user_id = serializers.IntegerField()
+    username = serializers.CharField()
+    full_name = serializers.CharField()
+    avatar_url = serializers.ImageField()
+    current_rating = serializers.IntegerField()
+    max_rating = serializers.IntegerField()
+    rank_title = serializers.CharField()
+    rank_color = serializers.CharField()
+    contests_participated = serializers.IntegerField()
+    contests_won = serializers.IntegerField()
+    total_problems_solved = serializers.IntegerField()

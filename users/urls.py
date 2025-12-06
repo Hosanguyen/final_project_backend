@@ -22,6 +22,11 @@ from .views import (
     AllRolesForSelectionView,
     UserAssignRolesView,
     UserRemoveRolesView,
+    # Rating views
+    GlobalRankingView,
+    UserRatingDetailView,
+    UserRatingHistoryView,
+    UpdateContestRatingsView,
 )
 
 
@@ -63,5 +68,20 @@ urlpatterns = [
     # HELPER VIEWS (cho frontend)
     path('selections/permissions/', AllPermissionsForSelectionView.as_view(), name='selections-permissions'),
     path('selections/roles/', AllRolesForSelectionView.as_view(), name='selections-roles'),
+
+    # ============= GLOBAL RANKING ENDPOINTS =============
+    # Global leaderboard
+    path('ranking/global/', GlobalRankingView.as_view(), name='global-ranking'),
+    
+    # User rating info
+    path('rating/me/', UserRatingDetailView.as_view(), name='my-rating'),
+    path('rating/<int:user_id>/', UserRatingDetailView.as_view(), name='user-rating'),
+    
+    # User rating history
+    path('rating/history/me/', UserRatingHistoryView.as_view(), name='my-rating-history'),
+    path('rating/history/<int:user_id>/', UserRatingHistoryView.as_view(), name='user-rating-history'),
+    
+    # Admin: update contest ratings
+    path('rating/contest/<int:contest_id>/update/', UpdateContestRatingsView.as_view(), name='update-contest-ratings'),
 
 ]

@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from .models import Language, Tag, File, Course, Lesson, LessonResource, Enrollment, Order
 from .models import Language, Tag, File, Course, Lesson, LessonResource, Enrollment, LessonQuiz
 
 class LanguageSerializer(serializers.ModelSerializer):
@@ -32,6 +33,7 @@ class CourseSerializer(serializers.ModelSerializer):
         required=False
     )
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    created_by_full_name = serializers.SerializerMethodField()
     updated_by_name = serializers.CharField(source='updated_by.username', read_only=True)
     lessons_count = serializers.SerializerMethodField()
     enrollments_count = serializers.SerializerMethodField()
@@ -41,8 +43,8 @@ class CourseSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'slug', 'title', 'short_description', 'long_description',
             'languages', 'tags', 'level', 'price', 'is_published', 
-            'published_at', 'created_by', 'created_by_name', 'created_at',
-            'updated_at', 'updated_by', 'updated_by_name', 'language_ids',
+            'published_at', 'created_by', 'created_by_name', 'created_by_full_name',
+            'created_at', 'updated_at', 'updated_by', 'updated_by_name', 'language_ids',
             'tag_ids', 'lessons_count', 'enrollments_count'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'published_at']
@@ -52,6 +54,11 @@ class CourseSerializer(serializers.ModelSerializer):
     
     def get_enrollments_count(self, obj):
         return obj.enrollments.count()
+    
+    def get_created_by_full_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.full_name or obj.created_by.username
+        return None
     
     def create(self, validated_data):
         language_ids = validated_data.pop('language_ids', [])
@@ -175,6 +182,7 @@ class LessonSerializer(serializers.ModelSerializer):
 class EnrollmentSerializer(serializers.ModelSerializer):
     course_title = serializers.CharField(source='course.title', read_only=True)
     user_name = serializers.CharField(source='user.username', read_only=True)
+    course = CourseSerializer(read_only=True)
     
     class Meta:
         model = Enrollment
@@ -183,3 +191,26 @@ class EnrollmentSerializer(serializers.ModelSerializer):
             'enrolled_at', 'progress_percent', 'last_accessed_at'
         ]
         read_only_fields = ['id', 'enrolled_at']
+
+
+class OrderSerializer(serializers.ModelSerializer):
+    course_title = serializers.CharField(source='course.title', read_only=True)
+    course_slug = serializers.CharField(source='course.slug', read_only=True)
+    user_name = serializers.CharField(source='user.username', read_only=True)
+    user_email = serializers.CharField(source='user.email', read_only=True)
+    
+    class Meta:
+        model = Order
+        fields = [
+            'id', 'user', 'course', 'order_code', 'amount', 'status',
+            'vnp_txn_ref', 'vnp_transaction_no', 'vnp_response_code',
+            'vnp_bank_code', 'vnp_pay_date', 'payment_method', 'metadata',
+            'created_at', 'updated_at', 'completed_at',
+            'course_title', 'course_slug', 'user_name', 'user_email'
+        ]
+        read_only_fields = [
+            'id', 'order_code', 'vnp_txn_ref', 'vnp_transaction_no',
+            'vnp_response_code', 'vnp_bank_code', 'vnp_pay_date',
+            'created_at', 'updated_at', 'completed_at'
+        ]
+
