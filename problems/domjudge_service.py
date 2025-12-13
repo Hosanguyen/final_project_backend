@@ -368,7 +368,7 @@ timelimit: {problem.time_limit_ms / 1000}
             "start_contest_time": start_contest_time,
             "end_time": end_time_str,
             "end_contest_time": end_contest_time,
-            "max_run_time": float(j['maxruntime']),
+            "max_run_time": float(j['maxruntime']) if j['maxruntime'] is not None else 0.0,
             "submission_id": str(j['submitid']),
             "id": str(j['judgingid']),
             "valid": bool(j['valid']),

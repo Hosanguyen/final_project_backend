@@ -1,5 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.apps import apps
+from django.utils import timezone
+from datetime import timedelta
 # app_name/apps.py
 
 def get_model_list():
@@ -157,6 +159,74 @@ def create_default_role_permissions(sender, **kwargs):
                 permission=permission
             )
 
+def create_practice_contest(sender, **kwargs):
+    """Create a practice contest and sync with DOMjudge"""
+    from contests.models import Contest
+    from contests.domjudge_service import DOMjudgeContestService
+    from common.connection import execute_raw_query
+    
+    # Check if practice contest already exists in local database
+    if Contest.objects.filter(slug="practice").exists():
+        return
+    
+    # Create practice contest
+    now = timezone.now()
+    # Set start time to 1 year ago and end time to 1 year from now
+    start_time = now - timedelta(days=365)
+    end_time = now + timedelta(days=365)
+    
+    practice_contest = Contest.objects.create(
+        slug="practice",
+        title="Practice Contest",
+        description="A permanent contest for practicing problems",
+        start_at=start_time,
+        end_at=end_time,
+        visibility="public",
+        contest_mode="OI",
+        is_show_result=True,
+        penalty_time=0,
+        penalty_mode="standard",
+        freeze_rankings_at=None
+    )
+    
+    # Check if contest with externalid='practice' already exists in DOMjudge
+    try:
+        check_query = """
+            SELECT cid, externalid, name 
+            FROM contest 
+            WHERE externalid = %s
+        """
+        existing_contests = execute_raw_query('domjudge', check_query, ['practice'], fetch=True)
+        
+        if existing_contests and len(existing_contests) > 0:
+            # Contest already exists in DOMjudge, skip sync
+            print(f"Practice contest already exists in DOMjudge (cid: {existing_contests[0]['cid']}), skipping sync")
+            return
+        
+        # Contest doesn't exist in DOMjudge, proceed with sync
+        domjudge_service = DOMjudgeContestService()
+        
+        # Calculate duration (2 years in hours)
+        duration_hours = 365 * 2 * 24
+        duration_str = f"{duration_hours}:00:00"
+        
+        contest_data = {
+            'id': practice_contest.slug,
+            'name': practice_contest.title,
+            'formal_name': practice_contest.title,
+            'start_time': practice_contest.start_at.isoformat(),
+            'duration': duration_str,
+            'penalty_time': practice_contest.penalty_time
+        }
+        
+        domjudge_service.create_contest(contest_data)
+        print("Practice contest successfully synced with DOMjudge")
+        
+    except Exception as e:
+        # If DOMjudge sync fails, still keep the local contest
+        print(f"Warning: Failed to sync practice contest with DOMjudge: {str(e)}")
+        print("Practice contest created locally but not synced with DOMjudge")
+
 class Command(BaseCommand):
     help = 'Initialize default roles, permissions and categories'
 
@@ -173,5 +243,9 @@ class Command(BaseCommand):
         self.stdout.write('Assigning permissions to roles...')
         create_default_role_permissions(sender=None)
         self.stdout.write(self.style.SUCCESS('✓ Role permissions assigned'))
+        
+        self.stdout.write('Creating practice contest...')
+        create_practice_contest(sender=None)
+        self.stdout.write(self.style.SUCCESS('✓ Practice contest created and synced with DOMjudge'))
         
         self.stdout.write(self.style.SUCCESS('\n✓ Initialization completed successfully!'))
