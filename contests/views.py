@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from datetime import timedelta
-from django.db.models import Q
+from django.db.models import Q, Count, Sum, Avg
 from django.core.paginator import Paginator, EmptyPage
 
 from .models import Contest, ContestProblem, ContestParticipant
@@ -776,6 +776,240 @@ class ContestParticipantsBulkAddView(APIView):
             'existed_user_ids': existed,
             'missing_user_ids': missing
         }, status=status.HTTP_200_OK)
+
+
+class ContestDetailStatisticsView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, contest_id):
+        try:
+            # Get the contest
+            contest = Contest.objects.filter(id=contest_id).first()
+            if not contest:
+                return Response({
+                    'error': 'Contest không tồn tại'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Get contest problems
+            contest_problems = ContestProblem.objects.filter(contest=contest).select_related('problem')
+            total_problems = contest_problems.count()
+            
+            # Get participants stats
+            participants = ContestParticipant.objects.filter(contest=contest)
+            total_participants = participants.count()
+            active_participants = participants.filter(is_active=True).count()
+            
+            # Get submissions for this contest
+            submissions = Submissions.objects.filter(
+                contest=contest
+            ).select_related('user', 'problem')
+            
+            total_submissions = submissions.count()
+            
+            # Submission by status
+            submission_stats = submissions.values('status').annotate(
+                count=Count('id')
+            ).order_by('-count')
+            
+            # Calculate acceptance rate
+            accepted_submissions = submissions.filter(status='AC').count()
+            acceptance_rate = round((accepted_submissions / total_submissions * 100) if total_submissions > 0 else 0, 2)
+            
+            # Submissions by problem
+            problem_stats = []
+            for cp in contest_problems:
+                problem_submissions = submissions.filter(problem=cp.problem)
+                problem_accepted = problem_submissions.filter(status='AC').count()
+                problem_total = problem_submissions.count()
+                
+                problem_stats.append({
+                    'problem_id': cp.problem.id,
+                    'problem_title': cp.problem.title,
+                    'alias': cp.alias,
+                    'total_submissions': problem_total,
+                    'accepted_submissions': problem_accepted,
+                    'acceptance_rate': round((problem_accepted / problem_total * 100) if problem_total > 0 else 0, 2),
+                    'point': cp.point
+                })
+            
+            # Top participants in this contest
+            top_participants_data = []
+            top_participants = participants.order_by('-solved_count', 'penalty_seconds')[:10]
+            
+            for participant in top_participants:
+                user_submissions = submissions.filter(user=participant.user)
+                user_ac = user_submissions.filter(status='AC').count()
+                
+                top_participants_data.append({
+                    'user_id': participant.user.id,
+                    'username': participant.user.username,
+                    'full_name': participant.user.full_name or participant.user.username,
+                    'solved_count': participant.solved_count,
+                    'total_score': float(participant.total_score),
+                    'total_submissions': user_submissions.count(),
+                    'accepted_submissions': user_ac,
+                    'penalty_seconds': participant.penalty_seconds
+                })
+            
+            # Submissions over time (by day during contest)
+            submissions_by_day = submissions.extra(
+                select={'day': "DATE_FORMAT(submitted_at, '%%Y-%%m-%%d')"}
+            ).values('day').annotate(
+                count=Count('id')
+            ).order_by('day')
+            
+            # Participants registration over time
+            participants_by_day = participants.extra(
+                select={'day': "DATE_FORMAT(registered_at, '%%Y-%%m-%%d')"}
+            ).values('day').annotate(
+                count=Count('id')
+            ).order_by('day')
+            
+            # Error distribution (non-AC submissions)
+            error_stats = submissions.exclude(status='AC').values('status').annotate(
+                count=Count('id')
+            ).order_by('-count')
+            
+            # Test case statistics from DOMjudge
+            test_case_stats = self._get_test_case_statistics(contest, submissions)
+            
+            # Recent submissions
+            recent_submissions = submissions.order_by('-submitted_at')[:20]
+            recent_submissions_data = []
+            
+            # Create a map of problem_id to contest_problem for alias lookup
+            problem_alias_map = {cp.problem.id: cp.alias for cp in contest_problems}
+            
+            for sub in recent_submissions:
+                recent_submissions_data.append({
+                    'id': sub.id,
+                    'user': sub.user.username,
+                    'problem': sub.problem.title,
+                    'alias': problem_alias_map.get(sub.problem.id, ''),
+                    'status': sub.status,
+                    'language': sub.language.name if sub.language else 'Unknown',
+                    'created_at': sub.submitted_at.isoformat()
+                })
+            
+            return Response({
+                'contest': {
+                    'id': contest.id,
+                    'slug': contest.slug,
+                    'title': contest.title,
+                    'description': contest.description,
+                    'start_at': contest.start_at.isoformat(),
+                    'end_at': contest.end_at.isoformat(),
+                    'visibility': contest.visibility,
+                    'contest_mode': contest.contest_mode,
+                    'is_show_result': contest.is_show_result
+                },
+                'statistics': {
+                    'problems': {
+                        'total': total_problems,
+                        'by_problem': problem_stats
+                    },
+                    'participants': {
+                        'total': total_participants,
+                        'active': active_participants,
+                        'top_participants': top_participants_data
+                    },
+                    'submissions': {
+                        'total': total_submissions,
+                        'accepted': accepted_submissions,
+                        'acceptance_rate': acceptance_rate,
+                        'by_status': list(submission_stats),
+                        'recent': recent_submissions_data
+                    },
+                    'errors': {
+                        'distribution': list(error_stats)
+                    },
+                    'test_cases': test_case_stats
+                },
+                'charts': {
+                    'submissions_over_time': list(submissions_by_day),
+                    'participants_registration': list(participants_by_day),
+                    'problem_statistics': problem_stats,
+                    'error_distribution': list(error_stats)
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import traceback
+            return Response({
+                'error': 'Không thể lấy thống kê chi tiết contest',
+                'details': str(e),
+                'traceback': traceback.format_exc()
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _get_test_case_statistics(self, contest, submissions):
+        """
+        Get test case statistics from DOMjudge database
+        Returns statistics about passed/failed test cases
+        """
+        from common.connection import execute_raw_query
+        
+        try:
+            # Get all submission IDs for this contest
+            submission_ids = [s.domjudge_submission_id for s in submissions if s.domjudge_submission_id]
+            
+            if not submission_ids:
+                return {
+                    'total_test_cases_run': 0,
+                    'passed_test_cases': 0,
+                    'failed_test_cases': 0,
+                    'by_verdict': []
+                }
+            
+            # Query DOMjudge to get test case results
+            placeholders = ','.join(['%s'] * len(submission_ids))
+            query = f"""
+                SELECT 
+                    jr.runresult as verdict,
+                    COUNT(*) as count
+                FROM judging_run jr
+                JOIN judging j ON jr.judgingid = j.judgingid
+                WHERE j.submitid IN ({placeholders})
+                    AND j.valid = 1
+                    AND jr.endtime IS NOT NULL
+                GROUP BY jr.runresult
+                ORDER BY count DESC
+            """
+            
+            results = execute_raw_query('domjudge', query, submission_ids, fetch=True)
+            
+            total_test_cases = 0
+            passed_test_cases = 0
+            by_verdict = []
+            
+            for row in results:
+                verdict = row['verdict']
+                count = row['count']
+                total_test_cases += count
+                
+                if verdict == 'correct':
+                    passed_test_cases += count
+                
+                by_verdict.append({
+                    'verdict': verdict,
+                    'count': count
+                })
+            
+            return {
+                'total_test_cases_run': total_test_cases,
+                'passed_test_cases': passed_test_cases,
+                'failed_test_cases': total_test_cases - passed_test_cases,
+                'by_verdict': by_verdict
+            }
+            
+        except Exception as e:
+            print(f"Error getting test case statistics: {str(e)}")
+            return {
+                'total_test_cases_run': 0,
+                'passed_test_cases': 0,
+                'failed_test_cases': 0,
+                'by_verdict': []
+            }
 
 
 class ContestRegistrationView(APIView):
