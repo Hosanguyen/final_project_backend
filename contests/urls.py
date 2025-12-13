@@ -16,11 +16,13 @@ from .views import (
     ContestUserCandidatesView,
     ContestParticipantsBulkAddView,
     ContestRecalculateRankingsView,
+    ContestStatisticsView,
 )
 
 urlpatterns = [
     path('', ContestListView.as_view(), name='contest-list'),
     path('create/', ContestCreateView.as_view(), name='contest-create'),
+    path('statistics/', ContestStatisticsView.as_view(), name='contest-statistics'),
     path('<int:contest_id>/', ContestDetailView.as_view(), name='contest-detail'),
     path('<int:contest_id>/problems/', ContestProblemView.as_view(), name='contest-add-problem'),
     path('<int:contest_id>/problems/<int:problem_id>/', ContestProblemView.as_view(), name='contest-remove-problem'),

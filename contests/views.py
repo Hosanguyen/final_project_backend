@@ -1076,3 +1076,239 @@ class ContestRecalculateRankingsView(APIView):
                 'error': 'Không thể tính lại xếp hạng',
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestStatisticsView(APIView):
+    """Get contest statistics for admin dashboard - separated Practice and Contest"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            from django.db.models import Count, Sum, Avg, Q
+            from django.utils import timezone
+            from datetime import timedelta
+            
+            now = timezone.now()
+            
+            # Separate Practice and Contest
+            practice_contest = Contest.objects.filter(slug='practice').first()
+            contests = Contest.objects.exclude(slug='practice')
+            
+            # === PRACTICE STATISTICS ===
+            practice_stats = {}
+            if practice_contest:
+                practice_problems = ContestProblem.objects.filter(contest=practice_contest).count()
+                practice_submissions = Submissions.objects.filter(contest=practice_contest).count()
+                practice_participants = ContestParticipant.objects.filter(
+                    contest=practice_contest, 
+                    is_active=True
+                ).count()
+                practice_accepted = Submissions.objects.filter(
+                    contest=practice_contest,
+                    status='correct'
+                ).count()
+                
+                practice_stats = {
+                    'total_problems': practice_problems,
+                    'total_submissions': practice_submissions,
+                    'total_participants': practice_participants,
+                    'accepted_submissions': practice_accepted,
+                    'acceptance_rate': round((practice_accepted / practice_submissions * 100) if practice_submissions > 0 else 0, 2)
+                }
+            
+            # === CONTEST STATISTICS ===
+            # Total contests (excluding practice)
+            total_contests = contests.count()
+            
+            # Contests by status
+            upcoming_contests = contests.filter(start_at__gt=now).count()
+            ongoing_contests = contests.filter(start_at__lte=now, end_at__gte=now).count()
+            ended_contests = contests.filter(end_at__lt=now).count()
+            
+            # Contests by visibility
+            public_contests = contests.filter(visibility='public').count()
+            private_contests = contests.filter(visibility='private').count()
+            
+            # Contests by mode
+            icpc_contests = contests.filter(contest_mode='ICPC').count()
+            oi_contests = contests.filter(contest_mode='OI').count()
+            
+            # Total problems in contests
+            contest_problem_ids = contests.values_list('id', flat=True)
+            total_contest_problems = ContestProblem.objects.filter(contest_id__in=contest_problem_ids).count()
+            
+            # Average problems per contest
+            avg_problems = ContestProblem.objects.filter(
+                contest_id__in=contest_problem_ids
+            ).values('contest').annotate(
+                count=Count('id')
+            ).aggregate(avg=Avg('count'))['avg'] or 0
+            
+            # Total participants (excluding practice)
+            total_participants = ContestParticipant.objects.filter(
+                contest_id__in=contest_problem_ids,
+                is_active=True
+            ).count()
+            
+            # Average participants per contest
+            avg_participants = ContestParticipant.objects.filter(
+                contest_id__in=contest_problem_ids,
+                is_active=True
+            ).values('contest').annotate(
+                count=Count('id')
+            ).aggregate(avg=Avg('count'))['avg'] or 0
+            
+            # Total submissions in contests (excluding practice)
+            total_submissions = Submissions.objects.filter(contest_id__in=contest_problem_ids).count()
+            
+            # Accepted submissions
+            accepted_submissions = Submissions.objects.filter(
+                contest_id__in=contest_problem_ids,
+                status='correct'
+            ).count()
+            
+            # Submission statistics by status for contests
+            submission_stats = Submissions.objects.filter(
+                contest_id__in=contest_problem_ids
+            ).values('status').annotate(count=Count('id')).order_by('-count')
+            
+            # Submissions over time (last 30 days) for chart
+            thirty_days_ago = now - timedelta(days=30)
+            submissions_by_date = Submissions.objects.filter(
+                contest_id__in=contest_problem_ids,
+                submitted_at__gte=thirty_days_ago
+            ).extra(
+                select={'date': 'DATE(submitted_at)'}
+            ).values('date').annotate(
+                count=Count('id')
+            ).order_by('date')
+            
+            # Contest creation trend (last 12 months) - MySQL compatible
+            twelve_months_ago = now - timedelta(days=365)
+            contests_by_month = contests.filter(
+                created_at__gte=twelve_months_ago
+            ).extra(
+                select={'month': "DATE_FORMAT(created_at, '%%Y-%%m')"}
+            ).values('month').annotate(
+                count=Count('id')
+            ).order_by('month')
+            
+            # Participant growth trend (last 12 months) - MySQL compatible
+            participants_by_month = ContestParticipant.objects.filter(
+                contest_id__in=contest_problem_ids,
+                registered_at__gte=twelve_months_ago,
+                is_active=True
+            ).extra(
+                select={'month': "DATE_FORMAT(registered_at, '%%Y-%%m')"}
+            ).values('month').annotate(
+                count=Count('id')
+            ).order_by('month')
+            
+            # Recent contests (excluding practice)
+            recent_contests = contests.select_related('created_by').order_by('-created_at')[:10]
+            recent_contests_data = []
+            for contest in recent_contests:
+                participants_count = ContestParticipant.objects.filter(
+                    contest=contest,
+                    is_active=True
+                ).count()
+                problems_count = ContestProblem.objects.filter(contest=contest).count()
+                submissions_count = Submissions.objects.filter(contest=contest).count()
+                
+                recent_contests_data.append({
+                    'id': contest.id,
+                    'title': contest.title,
+                    'slug': contest.slug,
+                    'start_at': contest.start_at,
+                    'end_at': contest.end_at,
+                    'visibility': contest.visibility,
+                    'contest_mode': contest.contest_mode,
+                    'participants_count': participants_count,
+                    'problems_count': problems_count,
+                    'submissions_count': submissions_count,
+                    'created_by': contest.created_by.username if contest.created_by else None,
+                    'created_at': contest.created_at
+                })
+            
+            # Most participated contests (excluding practice)
+            most_participated = contests.annotate(
+                participant_count=Count('participants', filter=Q(participants__is_active=True))
+            ).order_by('-participant_count')[:10]
+            
+            most_participated_data = []
+            for contest in most_participated:
+                most_participated_data.append({
+                    'id': contest.id,
+                    'title': contest.title,
+                    'slug': contest.slug,
+                    'participants_count': contest.participant_count,
+                    'start_at': contest.start_at,
+                    'end_at': contest.end_at
+                })
+            
+            # Top performers (users with most contest participations)
+            from users.models import User
+            top_performers = User.objects.filter(
+                contest_participations__contest_id__in=contest_problem_ids,
+                contest_participations__is_active=True
+            ).annotate(
+                contests_count=Count('contest_participations'),
+                total_solved=Sum('contest_participations__solved_count')
+            ).order_by('-total_solved', '-contests_count')[:10]
+            
+            top_performers_data = []
+            for user in top_performers:
+                top_performers_data.append({
+                    'id': user.id,
+                    'username': user.username,
+                    'full_name': user.full_name,
+                    'contests_participated': user.contests_count,
+                    'total_problems_solved': user.total_solved or 0
+                })
+            
+            return Response({
+                'practice': practice_stats,
+                'contests': {
+                    'overview': {
+                        'total_contests': total_contests,
+                        'upcoming_contests': upcoming_contests,
+                        'ongoing_contests': ongoing_contests,
+                        'ended_contests': ended_contests,
+                        'public_contests': public_contests,
+                        'private_contests': private_contests,
+                        'icpc_contests': icpc_contests,
+                        'oi_contests': oi_contests
+                    },
+                    'problems': {
+                        'total_contest_problems': total_contest_problems,
+                        'avg_problems_per_contest': round(avg_problems, 2)
+                    },
+                    'participants': {
+                        'total_participants': total_participants,
+                        'avg_participants_per_contest': round(avg_participants, 2)
+                    },
+                    'submissions': {
+                        'total_submissions': total_submissions,
+                        'accepted_submissions': accepted_submissions,
+                        'acceptance_rate': round((accepted_submissions / total_submissions * 100) if total_submissions > 0 else 0, 2),
+                        'by_status': list(submission_stats)
+                    },
+                    'recent_contests': recent_contests_data,
+                    'most_participated_contests': most_participated_data,
+                    'top_performers': top_performers_data
+                },
+                'charts': {
+                    'submissions_trend': list(submissions_by_date),
+                    'contests_by_month': list(contests_by_month),
+                    'participants_growth': list(participants_by_month)
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import traceback
+            return Response({
+                'error': 'Không thể lấy thống kê contest',
+                'details': str(e),
+                'traceback': traceback.format_exc()
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

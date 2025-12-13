@@ -93,7 +93,7 @@ MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', '12345')
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'finalproject',       
+        'NAME': 'dbtest_finalproject',       
         'USER': 'root',        
         'PASSWORD': '12345', 
         'HOST': 'localhost',   
