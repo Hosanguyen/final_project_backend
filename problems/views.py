@@ -489,8 +489,24 @@ class SubmissionCreateView(APIView):
             submission.feedback = str(e)
             submission.save()
             
+            # Parse error message to provide user-friendly feedback
+            error_message = str(e)
+            user_friendly_message = "Không thể kết nối đến hệ thống chấm bài. Vui lòng thử lại sau."
+            
+            # Check for common error patterns
+            if "Connection" in error_message or "connection" in error_message:
+                user_friendly_message = "Hệ thống chấm bài tạm thời không khả dụng. Vui lòng thử lại sau."
+            elif "timeout" in error_message.lower():
+                user_friendly_message = "Kết nối đến hệ thống chấm bài quá chậm. Vui lòng thử lại."
+            elif "401" in error_message or "403" in error_message:
+                user_friendly_message = "Lỗi xác thực với hệ thống chấm bài. Vui lòng liên hệ quản trị viên."
+            elif "404" in error_message:
+                user_friendly_message = "Không tìm thấy bài toán trên hệ thống chấm bài."
+            elif "500" in error_message:
+                user_friendly_message = "Hệ thống chấm bài gặp lỗi nội bộ. Vui lòng thử lại sau."
+            
             return Response({
-                "error": f"Submit to DOMjudge failed: {str(e)}"
+                "error": user_friendly_message
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
