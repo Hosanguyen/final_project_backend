@@ -89,11 +89,12 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
 MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', '12345')
+MAIN_DB_NAME = os.getenv('MAIN_DB_NAME', 'finalproject')
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'dbtest_finalproject',       
+        'NAME': MAIN_DB_NAME,       
         'USER': 'root',        
         'PASSWORD': '12345', 
         'HOST': 'localhost',   
