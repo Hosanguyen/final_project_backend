@@ -317,7 +317,10 @@ class ProblemUpdateSerializer(serializers.ModelSerializer):
         required=False
     )
     
-    # THÊM: Cho phép update test cases bằng ZIP
+    # ============ MANUAL MODE ============
+    test_cases = TestCaseCreateSerializer(many=True, write_only=True, required=False)
+    
+    # ============ ZIP MODE ============
     test_cases_zip = serializers.FileField(
         write_only=True, 
         required=False,
@@ -350,6 +353,9 @@ class ProblemUpdateSerializer(serializers.ModelSerializer):
             "time_limit_ms", "memory_limit_kb", "source", "is_public",
             "editorial_text", "editorial_file",
             "tag_ids", "language_ids",
+            # Manual mode
+            "test_cases",
+            # ZIP mode
             "test_cases_zip", "zip_auto_detect_type",
             "zip_default_type", "zip_default_points"
         ]
@@ -379,11 +385,25 @@ class ProblemUpdateSerializer(serializers.ModelSerializer):
         
         return value
     
+    def validate(self, attrs):
+        """Validate: Không được gửi cả 2 mode cùng lúc"""
+        test_cases = attrs.get('test_cases')
+        test_cases_zip = attrs.get('test_cases_zip')
+        
+        # Cả 2 đều có
+        if test_cases and test_cases_zip:
+            raise serializers.ValidationError({
+                "test_cases": "Chỉ được chọn 1 trong 2 mode: manual hoặc ZIP"
+            })
+        
+        return attrs
+    
     def update(self, instance, validated_data):
         tag_ids = validated_data.pop("tag_ids", None)
         language_ids = validated_data.pop("language_ids", None)
         
-        # Extract ZIP data
+        # Extract test case data
+        test_cases_manual = validated_data.pop("test_cases", None)
         test_cases_zip = validated_data.pop("test_cases_zip", None)
         zip_auto_detect = validated_data.pop("zip_auto_detect_type", True)
         zip_default_type = validated_data.pop("zip_default_type", "secret")
@@ -404,8 +424,19 @@ class ProblemUpdateSerializer(serializers.ModelSerializer):
             languages = Language.objects.filter(id__in=language_ids)
             instance.allowed_languages.set(languages)
         
-        # Update test cases từ ZIP (XÓA cũ và THAY THẾ)
-        if test_cases_zip:
+        # ============ UPDATE TEST CASES ============
+        
+        # MODE 1: Manual - XÓA cũ và THAY THẾ
+        if test_cases_manual:
+            # XÓA tất cả test cases cũ
+            instance.test_cases.all().delete()
+            
+            # Tạo mới từ manual data
+            for tc_data in test_cases_manual:
+                TestCase.objects.create(problem=instance, **tc_data)
+        
+        # MODE 2: ZIP - XÓA cũ và THAY THẾ
+        elif test_cases_zip:
             from .utils import TestCaseZipProcessor
             
             # XÓA tất cả test cases cũ
