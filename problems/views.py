@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from django.utils import timezone
 
-from .models import Problem, TestCase
+from .models import Problem, TestCase, Submissions
 from .serializers import (
     ProblemListSerializer, ProblemDetailSerializer,
     ProblemCreateSerializer, ProblemUpdateSerializer,
@@ -391,15 +391,89 @@ class ProblemStatisticsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, id):
-        problem = get_object_or_404(Problem, id=id)
+        from contests.models import Contest, ContestProblem
+        from django.db.models import Count, Avg, Max, Min
+        from datetime import datetime, timedelta
         
-        # TODO: Implement statistics từ Submission model
+        problem = get_object_or_404(Problem, id=id)
+        contest_id = request.query_params.get('contest_id')
+        
+        # Base queryset for submissions
+        submissions_qs = Submissions.objects.filter(problem=problem)
+        
+        # Filter by contest if provided
+        if contest_id:
+            submissions_qs = submissions_qs.filter(contest_id=contest_id)
+        
+        # Total submissions
+        total_submissions = submissions_qs.count()
+        
+        # Submissions by status
+        by_status = list(submissions_qs.values('status')
+                        .annotate(count=Count('id'))
+                        .order_by('-count'))
+        
+        # Accepted submissions
+        accepted_submissions = submissions_qs.filter(status='correct').count()
+        acceptance_rate = round((accepted_submissions / total_submissions * 100), 2) if total_submissions > 0 else 0
+        
+        # Unique solvers
+        unique_solvers = submissions_qs.filter(status='correct').values('user').distinct().count()
+        
+        # Submissions over time (last 30 days)
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        submissions_by_date = submissions_qs.filter(
+            submitted_at__gte=thirty_days_ago
+        ).extra(
+            select={'date': 'DATE(submitted_at)'}
+        ).values('date').annotate(
+            count=Count('id')
+        ).order_by('date')
+        
+        # Top solvers (users with AC)
+        top_solvers = list(
+            submissions_qs.filter(status='correct')
+            .values('user__username', 'user__full_name')
+            .annotate(
+                ac_count=Count('id'),
+                first_ac=Min('submitted_at')
+            )
+            .order_by('-ac_count', 'first_ac')[:10]
+        )
+        
+        # Get contests this problem appears in (only if not filtering by specific contest)
+        contests_list = []
+        if not contest_id:
+            contest_problems = ContestProblem.objects.filter(problem=problem).select_related('contest')
+            for cp in contest_problems:
+                contest_submissions = Submissions.objects.filter(problem=problem, contest=cp.contest)
+                contest_ac = contest_submissions.filter(status='correct').count()
+                contest_total = contest_submissions.count()
+                
+                contests_list.append({
+                    'contest_id': cp.contest.id,
+                    'contest_title': cp.contest.title,
+                    'alias': cp.alias,
+                    'point': float(cp.point),
+                    'total_submissions': contest_total,
+                    'accepted_submissions': contest_ac,
+                })
+        
         stats = {
             "problem_id": problem.id,
             "problem_title": problem.title,
+            "contest_id": contest_id,
             "is_synced_to_domjudge": problem.is_synced_to_domjudge,
             "last_synced_at": problem.last_synced_at,
             "test_case_count": problem.test_cases.count(),
+            "total_submissions": total_submissions,
+            "accepted_submissions": accepted_submissions,
+            "acceptance_rate": acceptance_rate,
+            "unique_solvers": unique_solvers,
+            "by_status": by_status,
+            "submissions_by_date": list(submissions_by_date),
+            "top_solvers": top_solvers,
+            "contests": contests_list,
         }
         
         return Response(stats)
