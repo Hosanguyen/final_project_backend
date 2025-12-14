@@ -17,6 +17,7 @@ from .course_reports_views import (
     CourseReportsTopCoursesView,
     CourseReportsAllCoursesView
 )
+from .revenue_views import RevenueStatisticsView
 
 urlpatterns = [
     # Language URLs
@@ -58,4 +59,7 @@ urlpatterns = [
     path("courses/reports/category-distribution/", CourseReportsCategoryDistributionView.as_view(), name="course-reports-category-distribution"),
     path("courses/reports/revenue-stats/", CourseReportsRevenueStatsView.as_view(), name="course-reports-revenue-stats"),
     path("courses/reports/completion-stats/", CourseReportsCompletionStatsView.as_view(), name="course-reports-completion-stats"),
+    
+    # Revenue Statistics URLs
+    path("revenue/statistics/", RevenueStatisticsView.as_view(), name="revenue-statistics"),
 ]
