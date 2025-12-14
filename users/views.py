@@ -1,8 +1,8 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, serializers
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
@@ -60,18 +60,34 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        username = serializer.validated_data["username"]
+        username_or_email = serializer.validated_data["username"]
         password = serializer.validated_data["password"]
 
+        # Try to find user by username or email
+        user = None
         try:
-            user = User.objects.get(username=username)
+            # Try to find by username first
+            user = User.objects.get(username=username_or_email)
         except User.DoesNotExist:
-            return Response({"detail": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            # If not found, try to find by email
+            try:
+                user = User.objects.get(email=username_or_email)
+            except User.DoesNotExist:
+                return Response(
+                    {"detail": "Tên đăng nhập hoặc mật khẩu không đúng"}, 
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
 
         if not user.check_password(password):
-            return Response({"detail": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response(
+                {"detail": "Tên đăng nhập hoặc mật khẩu không đúng"}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
         if not user.active:
-            return Response({"detail": "User is not active"}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response(
+                {"detail": "Tài khoản chưa được kích hoạt"}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
         # cập nhật last_login
         user.last_login_at = timezone.now()
         user.last_login_ip = request.META.get("REMOTE_ADDR")
@@ -321,9 +337,28 @@ class UserResetPasswordView(APIView):
     def put(self, request):
         user = request.user
         serializer = UserResetPasswordSerializer(user, data=request.data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
+        
+        if not serializer.is_valid():
+            # Get the first error message
+            errors = serializer.errors
+            if errors:
+                # Get first field's error
+                first_field = list(errors.keys())[0]
+                error_messages = errors[first_field]
+                error_message = error_messages[0] if isinstance(error_messages, list) else str(error_messages)
+            else:
+                error_message = "Dữ liệu không hợp lệ"
+            
+            return Response(
+                {"error": error_message}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         serializer.save()
-        return Response({"detail": "Password updated successfully"}, status=status.HTTP_200_OK)
+        return Response(
+            {"message": "Đổi mật khẩu thành công"}, 
+            status=status.HTTP_200_OK
+        )
 
 class UserAvatarView(APIView):
     authentication_classes = [CustomJWTAuthentication]
@@ -668,7 +703,7 @@ class AllRolesForSelectionView(APIView):
 
 class GlobalRankingView(APIView):
     authentication_classes = [CustomJWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]  # Allow anyone to view global rankings
 
     """
     GET: Lấy bảng xếp hạng global

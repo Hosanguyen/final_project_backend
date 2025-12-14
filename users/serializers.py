@@ -17,7 +17,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    username = serializers.CharField()
+    username = serializers.CharField(help_text="Tên đăng nhập hoặc email")
     password = serializers.CharField(write_only=True)
 
 class UserListSerializer(serializers.ModelSerializer):
@@ -54,22 +54,37 @@ class UserProfileSerializer(serializers.ModelSerializer):
 class UserResetPasswordSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["old_password", "password", "password_confirm"]
+        fields = ["current_password", "new_password"]
     
-    old_password = serializers.CharField(write_only=True)
-    password = serializers.CharField(write_only=True)
-    password_confirm = serializers.CharField(write_only=True)
+    current_password = serializers.CharField(write_only=True, required=True)
+    new_password = serializers.CharField(write_only=True, required=True, min_length=6)
+
+    def validate_current_password(self, value):
+        user = self.context["request"].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Mật khẩu hiện tại không đúng")
+        return value
+
+    def validate_new_password(self, value):
+        if len(value) < 6:
+            raise serializers.ValidationError("Mật khẩu mới phải có ít nhất 6 ký tự")
+        return value
 
     def validate(self, attrs):
         user = self.context["request"].user
-        if not user.check_password(attrs["old_password"]):
-            raise serializers.ValidationError("Old password is incorrect")
-        if attrs["password"] != attrs["password_confirm"]:
-            raise serializers.ValidationError("New password and confirm password do not match")
+        current_password = attrs.get("current_password")
+        new_password = attrs.get("new_password")
+        
+        # Check if new password is the same as current password
+        if user.check_password(new_password):
+            raise serializers.ValidationError({
+                "new_password": "Mật khẩu mới không được trùng với mật khẩu hiện tại"
+            })
+        
         return attrs
     
     def update(self, instance, validated_data):
-        instance.set_password(validated_data["password"])
+        instance.set_password(validated_data["new_password"])
         instance.save()
         return instance
 

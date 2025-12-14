@@ -29,6 +29,13 @@ from .views import (
     UpdateContestRatingsView,
 )
 
+# Public Profile Views
+from .public_profile_views import (
+    PublicUserProfileView,
+    PublicUserProblemsView,
+    PublicUserContestsView,
+)
+
 # User Reports Views
 from .user_reports_views import (
     UserReportsStatsView,
@@ -116,5 +123,11 @@ urlpatterns = [
     
     # All users list with pagination
     path('reports/all-users/', UserReportsAllUsersView.as_view(), name='user-reports-all-users'),
+
+    # ============= PUBLIC USER PROFILE ENDPOINTS =============
+    # Public profile (anyone can view)
+    path('<int:user_id>/profile/', PublicUserProfileView.as_view(), name='public-user-profile'),
+    path('<int:user_id>/problems/', PublicUserProblemsView.as_view(), name='public-user-problems'),
+    path('<int:user_id>/contests/', PublicUserContestsView.as_view(), name='public-user-contests'),
 
 ]
