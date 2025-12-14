@@ -1,7 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.db.models import Q
 from django.utils import timezone
 from django.db import transaction
@@ -22,6 +22,12 @@ from .vnpay_service import VNPayService
 class LanguageView(APIView):
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view languages list"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     # Lấy danh sách hoặc tạo mới
     def get(self, request):
@@ -90,6 +96,12 @@ class LanguageDetailView(APIView):
 class CourseView(APIView):
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view courses list"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     def get(self, request):
         """Lấy danh sách courses với filter và search"""
@@ -518,6 +530,12 @@ class LessonResourceDetailView(APIView):
 class TagView(APIView):
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view tags list"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     def get(self, request):
         """Lấy danh sách tags"""

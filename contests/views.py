@@ -1,7 +1,7 @@
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.utils import timezone
 from datetime import timedelta
 from django.db.models import Q, Count, Sum, Avg
@@ -95,6 +95,12 @@ class ContestListView(APIView):
     """List all contests"""
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view contests list"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
     
     def get(self, request):
         contests = Contest.objects.all()
@@ -126,6 +132,12 @@ class ContestDetailView(APIView):
     """Get, update, or delete a specific contest"""
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view contest details"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
     
     def get(self, request, contest_id):
         try:
@@ -357,6 +369,12 @@ class ContestDetailUserView(APIView):
     """Get, update, or delete a specific contest"""
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view practice contest"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
     
     def get(self, request):
         try:
@@ -422,6 +440,12 @@ class UserContestsView(APIView):
     """Get all contests excluding practice contest for user header"""
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view contests list"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
     
     def get(self, request):
         try:
@@ -476,6 +500,12 @@ class UserContestDetailView(APIView):
     """Get contest details for user with problems sorted by label"""
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view contest details"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
     
     def get(self, request, contest_id):
         try:
@@ -491,19 +521,20 @@ class UserContestDetailView(APIView):
             else:
                 contest_status = 'running'
             
-            # Check if user is registered for the contest
+            # Check if user is registered for the contest (only for authenticated users)
             is_registered = False
             registered_at = None
-            try:
-                participant = ContestParticipant.objects.get(
-                    contest=contest,
-                    user=user,
-                    is_active=True
-                )
-                is_registered = True
-                registered_at = participant.registered_at
-            except ContestParticipant.DoesNotExist:
-                pass
+            if user.is_authenticated:
+                try:
+                    participant = ContestParticipant.objects.get(
+                        contest=contest,
+                        user=user,
+                        is_active=True
+                    )
+                    is_registered = True
+                    registered_at = participant.registered_at
+                except ContestParticipant.DoesNotExist:
+                    pass
             
             # Show problems logic:
             # - If contest finished: everyone can view (registered or not)
@@ -1181,6 +1212,12 @@ class ContestLeaderboardView(APIView):
     """Get leaderboard for a contest"""
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view contest leaderboard"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
     
     def get(self, request, contest_id):
         """Get contest leaderboard with rankings"""
