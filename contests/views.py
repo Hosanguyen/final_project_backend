@@ -142,6 +142,14 @@ class ContestDetailView(APIView):
     def get(self, request, contest_id):
         try:
             contest = Contest.objects.get(id=contest_id)
+            
+            # Chặn truy cập contest practice từ link trực tiếp
+            if contest.slug == 'practice':
+                return Response({
+                    'error': 'Practice contest cannot be accessed directly. Please use /practice page.',
+                    'redirect_to': '/practice'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
             serializer = ContestSerializer(contest)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Contest.DoesNotExist:

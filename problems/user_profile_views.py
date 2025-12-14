@@ -211,9 +211,11 @@ class UserRegisteredContestsView(APIView):
             
             from contests.models import ContestParticipant, Contest
             
-            # Lấy các contests mà user đã đăng ký
+            # Lấy các contests mà user đã đăng ký, loại bỏ contest practice
             participants = ContestParticipant.objects.filter(
                 user=user
+            ).exclude(
+                contest__slug='practice'
             ).select_related('contest').order_by('-registered_at')
             
             # Count total
@@ -249,5 +251,63 @@ class UserRegisteredContestsView(APIView):
         except Exception as e:
             return Response({
                 'error': 'Failed to fetch user contests',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class UserStatisticsView(APIView):
+    """
+    API mới cho UserProfile - Statistics tổng hợp
+    Trả về các thống kê đã tính toán sẵn:
+    - total_submissions: Tổng số submissions
+    - accepted_submissions: Số submissions AC
+    - acceptance_rate: Tỷ lệ AC (%)
+    - problems_solved: Số problems đã giải (AC)
+    - contests_participated: Số contests đã tham gia
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            user = request.user
+            
+            # Lấy tất cả submissions của user
+            all_submissions = Submissions.objects.filter(user=user)
+            
+            # Tính total submissions
+            total_submissions = all_submissions.count()
+            
+            # Tính accepted submissions
+            accepted_submissions = all_submissions.filter(
+                status__iexact='AC'
+            ).count()
+            
+            # Tính acceptance rate
+            acceptance_rate = round((accepted_submissions / total_submissions * 100), 2) if total_submissions > 0 else 0
+            
+            # Tính problems solved (unique problems có AC)
+            problems_solved = all_submissions.filter(
+                status__iexact='AC'
+            ).values('problem').distinct().count()
+            
+            # Tính contests participated (unique contests đã submit, loại bỏ practice)
+            contests_participated = all_submissions.filter(
+                contest__isnull=False
+            ).exclude(
+                contest__slug='practice'
+            ).values('contest').distinct().count()
+            
+            return Response({
+                'total_submissions': total_submissions,
+                'accepted_submissions': accepted_submissions,
+                'acceptance_rate': acceptance_rate,
+                'problems_solved': problems_solved,
+                'contests_participated': contests_participated
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({
+                'error': 'Failed to fetch user statistics',
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

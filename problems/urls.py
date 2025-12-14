@@ -6,7 +6,8 @@ from .views import (
     SubmissionCreateView, SubmissionListView, SubmissionDetailView
 )
 from .user_profile_views import (
-    UserProblemsView, UserSubmissionsView, UserRegisteredContestsView
+    UserProblemsView, UserSubmissionsView, UserRegisteredContestsView,
+    UserStatisticsView
 )
 
 urlpatterns = [
@@ -31,4 +32,5 @@ urlpatterns = [
     path('user/problems/', UserProblemsView.as_view(), name='user-problems'),
     path('user/submissions/', UserSubmissionsView.as_view(), name='user-submissions'),
     path('user/contests/', UserRegisteredContestsView.as_view(), name='user-contests'),
+    path('user/statistics/', UserStatisticsView.as_view(), name='user-statistics'),
 ]
