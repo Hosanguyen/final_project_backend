@@ -138,7 +138,22 @@ class CourseView(APIView):
 
     def post(self, request):
         """Tạo course mới"""
-        serializer = CourseSerializer(data=request.data)
+        # Handle banner file upload
+        banner_file = request.FILES.get('banner_file')
+        data = request.data.copy()
+        
+        if banner_file:
+            # Create File instance for banner
+            file_instance = File.objects.create(
+                storage_key=banner_file,
+                filename=banner_file.name,
+                file_type=banner_file.content_type,
+                size=banner_file.size,
+                is_public=True
+            )
+            data['banner'] = file_instance.id
+        
+        serializer = CourseSerializer(data=data)
         if serializer.is_valid():
             # Set created_by to current user
             serializer.save(created_by=request.user, updated_by=request.user)
@@ -184,7 +199,23 @@ class CourseDetailView(APIView):
         course = self.get_object(pk=pk, slug=slug)
         if not course:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
-        serializer = CourseSerializer(course, data=request.data)
+        
+        # Handle banner file upload
+        banner_file = request.FILES.get('banner_file')
+        data = request.data.copy()
+        
+        if banner_file:
+            # Create File instance for banner
+            file_instance = File.objects.create(
+                storage_key=banner_file,
+                filename=banner_file.name,
+                file_type=banner_file.content_type,
+                size=banner_file.size,
+                is_public=True
+            )
+            data['banner'] = file_instance.id
+        
+        serializer = CourseSerializer(course, data=data)
         if serializer.is_valid():
             serializer.save(updated_by=request.user)
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -195,7 +226,23 @@ class CourseDetailView(APIView):
         course = self.get_object(pk=pk, slug=slug)
         if not course:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
-        serializer = CourseSerializer(course, data=request.data, partial=True)
+        
+        # Handle banner file upload
+        banner_file = request.FILES.get('banner_file')
+        data = request.data.copy()
+        
+        if banner_file:
+            # Create File instance for banner
+            file_instance = File.objects.create(
+                storage_key=banner_file,
+                filename=banner_file.name,
+                file_type=banner_file.content_type,
+                size=banner_file.size,
+                is_public=True
+            )
+            data['banner'] = file_instance.id
+        
+        serializer = CourseSerializer(course, data=data, partial=True)
         if serializer.is_valid():
             serializer.save(updated_by=request.user)
             return Response(serializer.data, status=status.HTTP_200_OK)

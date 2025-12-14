@@ -67,6 +67,7 @@ class Course(models.Model):
     title = models.CharField(max_length=255)
     short_description = models.CharField(max_length=512, null=True, blank=True)
     long_description = models.TextField(null=True, blank=True)
+    banner = models.ForeignKey(File, on_delete=models.SET_NULL, null=True, blank=True, related_name="course_banners", help_text="Banner image for course")
     languages = models.ManyToManyField(Language, related_name="courses", blank=True)
     tags = models.ManyToManyField(Tag, related_name="courses", blank=True)
     level = models.CharField(max_length=20, choices=LEVEL_CHOICES, default="beginner")

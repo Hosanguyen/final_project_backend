@@ -22,6 +22,7 @@ class FileSerializer(serializers.ModelSerializer):
 class CourseSerializer(serializers.ModelSerializer):
     languages = LanguageSerializer(many=True, read_only=True)
     tags = TagSerializer(many=True, read_only=True)
+    banner_url = serializers.CharField(source='banner.file_url', read_only=True)
     language_ids = serializers.ListField(
         child=serializers.IntegerField(), 
         write_only=True, 
@@ -42,7 +43,7 @@ class CourseSerializer(serializers.ModelSerializer):
         model = Course
         fields = [
             'id', 'slug', 'title', 'short_description', 'long_description',
-            'languages', 'tags', 'level', 'price', 'is_published', 
+            'banner', 'banner_url', 'languages', 'tags', 'level', 'price', 'is_published', 
             'published_at', 'created_by', 'created_by_name', 'created_by_full_name',
             'created_at', 'updated_at', 'updated_by', 'updated_by_name', 'language_ids',
             'tag_ids', 'lessons_count', 'enrollments_count'
