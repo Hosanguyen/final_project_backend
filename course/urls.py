@@ -8,6 +8,15 @@ from .views import (
     CreatePaymentView, VNPayReturnView, CheckPaymentStatusView,
     OrderHistoryView, CheckEnrollmentView, EnrollmentListView
 )
+from .course_reports_views import (
+    CourseReportsStatsView,
+    CourseReportsEnrollmentGrowthView,
+    CourseReportsCategoryDistributionView,
+    CourseReportsRevenueStatsView,
+    CourseReportsCompletionStatsView,
+    CourseReportsTopCoursesView,
+    CourseReportsAllCoursesView
+)
 
 urlpatterns = [
     # Language URLs
@@ -40,4 +49,13 @@ urlpatterns = [
     # Enrollment URLs
     path("enrollment/check/<int:course_id>/", CheckEnrollmentView.as_view(), name="check-enrollment"),
     path("enrollment/list/", EnrollmentListView.as_view(), name="enrollment-list"),
+    
+    # Reports URLs
+    path("courses/reports/stats/", CourseReportsStatsView.as_view(), name="course-reports-stats"),
+    path("courses/reports/top-courses/", CourseReportsTopCoursesView.as_view(), name="course-reports-top-courses"),
+    path("courses/reports/all-courses/", CourseReportsAllCoursesView.as_view(), name="course-reports-all-courses"),
+    path("courses/reports/enrollment-growth/", CourseReportsEnrollmentGrowthView.as_view(), name="course-reports-enrollment-growth"),
+    path("courses/reports/category-distribution/", CourseReportsCategoryDistributionView.as_view(), name="course-reports-category-distribution"),
+    path("courses/reports/revenue-stats/", CourseReportsRevenueStatsView.as_view(), name="course-reports-revenue-stats"),
+    path("courses/reports/completion-stats/", CourseReportsCompletionStatsView.as_view(), name="course-reports-completion-stats"),
 ]
