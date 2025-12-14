@@ -1321,29 +1321,73 @@ class ContestStatisticsView(APIView):
         try:
             from django.db.models import Count, Sum, Avg, Q
             from django.utils import timezone
-            from datetime import timedelta
+            from datetime import timedelta, datetime
             
             now = timezone.now()
+            
+            # Get month parameter (format: YYYY-MM)
+            month_param = request.query_params.get('month')
+            
+            # Parse month filter
+            month_filter = {}
+            if month_param:
+                try:
+                    year, month = map(int, month_param.split('-'))
+                    # Get first and last day of the month
+                    from calendar import monthrange
+                    first_day = datetime(year, month, 1)
+                    last_day = datetime(year, month, monthrange(year, month)[1], 23, 59, 59)
+                    
+                    # Make timezone aware
+                    first_day = timezone.make_aware(first_day)
+                    last_day = timezone.make_aware(last_day)
+                    
+                    month_filter = {
+                        'created_at__gte': first_day,
+                        'created_at__lte': last_day
+                    }
+                except (ValueError, AttributeError):
+                    pass
             
             # Separate Practice and Contest
             practice_contest = Contest.objects.filter(slug='practice').first()
             contests = Contest.objects.exclude(slug='practice')
             
+            # Apply month filter to contests if provided
+            if month_filter:
+                contests = contests.filter(**month_filter)
+            
             # === PRACTICE STATISTICS ===
             practice_stats = {}
             if practice_contest:
                 practice_problems = ContestProblem.objects.filter(contest=practice_contest).count()
-                practice_submissions = Submissions.objects.filter(contest=practice_contest).count()
-                practice_participants = ContestParticipant.objects.filter(
-                    contest=practice_contest, 
-                    is_active=True
-                ).count()
-                practice_accepted = Submissions.objects.filter(
-                    contest=practice_contest,
-                    status='correct'
-                ).count()
+                
+                # Practice submissions with month filter
+                practice_sub_filter = {'contest': practice_contest}
+                if month_filter:
+                    practice_sub_filter.update({
+                        'submitted_at__gte': month_filter['created_at__gte'],
+                        'submitted_at__lte': month_filter['created_at__lte']
+                    })
+                practice_submissions = Submissions.objects.filter(**practice_sub_filter).count()
+                
+                # Practice participants with month filter
+                practice_part_filter = {'contest': practice_contest, 'is_active': True}
+                if month_filter:
+                    practice_part_filter.update({
+                        'registered_at__gte': month_filter['created_at__gte'],
+                        'registered_at__lte': month_filter['created_at__lte']
+                    })
+                practice_participants = ContestParticipant.objects.filter(**practice_part_filter).count()
+                
+                # Practice accepted submissions
+                practice_accepted_filter = practice_sub_filter.copy()
+                practice_accepted_filter['status'] = 'correct'
+                practice_accepted = Submissions.objects.filter(**practice_accepted_filter).count()
                 
                 practice_stats = {
+                    'contest_id': practice_contest.id,
+                    'contest_slug': practice_contest.slug,
                     'total_problems': practice_problems,
                     'total_submissions': practice_submissions,
                     'total_participants': practice_participants,
@@ -1380,32 +1424,37 @@ class ContestStatisticsView(APIView):
             ).aggregate(avg=Avg('count'))['avg'] or 0
             
             # Total participants (excluding practice)
-            total_participants = ContestParticipant.objects.filter(
-                contest_id__in=contest_problem_ids,
-                is_active=True
-            ).count()
+            participant_filter = {'contest_id__in': contest_problem_ids, 'is_active': True}
+            if month_filter:
+                participant_filter.update({
+                    'registered_at__gte': month_filter['created_at__gte'],
+                    'registered_at__lte': month_filter['created_at__lte']
+                })
+            total_participants = ContestParticipant.objects.filter(**participant_filter).count()
             
             # Average participants per contest
             avg_participants = ContestParticipant.objects.filter(
-                contest_id__in=contest_problem_ids,
-                is_active=True
+                **participant_filter
             ).values('contest').annotate(
                 count=Count('id')
             ).aggregate(avg=Avg('count'))['avg'] or 0
             
             # Total submissions in contests (excluding practice)
-            total_submissions = Submissions.objects.filter(contest_id__in=contest_problem_ids).count()
+            submission_filter = {'contest_id__in': contest_problem_ids}
+            if month_filter:
+                submission_filter.update({
+                    'submitted_at__gte': month_filter['created_at__gte'],
+                    'submitted_at__lte': month_filter['created_at__lte']
+                })
+            total_submissions = Submissions.objects.filter(**submission_filter).count()
             
             # Accepted submissions
-            accepted_submissions = Submissions.objects.filter(
-                contest_id__in=contest_problem_ids,
-                status='correct'
-            ).count()
+            accepted_filter = submission_filter.copy()
+            accepted_filter['status'] = 'correct'
+            accepted_submissions = Submissions.objects.filter(**accepted_filter).count()
             
             # Submission statistics by status for contests
-            submission_stats = Submissions.objects.filter(
-                contest_id__in=contest_problem_ids
-            ).values('status').annotate(count=Count('id')).order_by('-count')
+            submission_stats = Submissions.objects.filter(**submission_filter).values('status').annotate(count=Count('id')).order_by('-count')
             
             # Submissions over time (last 30 days) for chart
             thirty_days_ago = now - timedelta(days=30)
