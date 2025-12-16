@@ -128,10 +128,16 @@ class DOMjudgeService:
         
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             # Add problem.yaml
-            problem_yaml = f"""name: '{problem.title}'
-timelimit: {problem.time_limit_ms / 1000}
-"""
+#             problem_yaml = f"""name: '{problem.title}'
+# timelimit: {problem.time_limit_ms / 1000}
+# """   
+            problem_yaml = ""
+            problem_yaml += f"name: \"{problem.title}\"\n"
+            problem_yaml += "limits:\n"
+            # problem_yaml += f"  time_limit: {problem.time_limit_ms / 1000}\n"
+            problem_yaml += f"  memory: {problem.memory_limit_kb / 1024}\n"  # memory in MiB
             zip_file.writestr('problem.yaml', problem_yaml)
+            zip_file.writestr('.timelimit', str(round(problem.time_limit_ms / 1000, 2)))
             
             # Add statement (optional)
             if problem.statement_text:
