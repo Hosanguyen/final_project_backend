@@ -794,3 +794,106 @@ class SubmissionDetailView(APIView):
         from .serializers import SubmissionDetailSerializer
         serializer = SubmissionDetailSerializer(submission)
         return Response(serializer.data)
+
+
+class ProblemRecommendationView(APIView):
+    """
+    GET: Lấy danh sách bài toán được gợi ý cho user hiện tại
+    Dựa trên model đã train và lịch sử giải bài của user
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        import pickle
+        import os
+        from django.conf import settings
+        
+        try:
+            user = request.user
+            
+            # Lấy tham số
+            n_recommendations = int(request.query_params.get('limit', 10))
+            strategy = request.query_params.get('strategy', 'similar')  # similar or challenging
+            
+            if strategy not in ['similar', 'challenging']:
+                return Response({
+                    'error': 'Invalid strategy. Use "similar" or "challenging"'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Load model
+            model_path = os.path.join(settings.BASE_DIR, 'media', 'models', 'recommendation_model.pkl')
+            
+            if not os.path.exists(model_path):
+                return Response({
+                    'error': 'Recommendation model not found. Please train the model first.',
+                    'hint': 'Run: python manage.py train_recommendation'
+                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            
+            with open(model_path, 'rb') as f:
+                model_data = pickle.load(f)
+            
+            # Khôi phục recommender
+            from common.recommender import ProductionRecommender
+            recommender = ProductionRecommender()
+            recommender.__dict__.update(model_data)
+            
+            # Lấy danh sách bài đã giải của user (AC only)
+            solved_submissions = Submissions.objects.filter(
+                user=user,
+                status='ac',
+                contest__isnull=True  # Practice mode only
+            ).values_list('problem_id', flat=True).distinct()
+            
+            solved_ids = list(solved_submissions)
+            
+            # Lấy danh sách bài public và active
+            valid_problem_ids = set(
+                Problem.objects.filter(
+                    is_public=True,
+                    is_synced_to_domjudge=True
+                ).values_list('id', flat=True)
+            )
+            
+            # Gọi recommend
+            recommendations = recommender.recommend(
+                user_id=user.id,
+                solved_ids=solved_ids,
+                valid_problem_ids_set=valid_problem_ids,
+                n_recommendations=n_recommendations,
+                strategy=strategy
+            )
+            
+            # Nếu không có gợi ý (cold start hoặc đã giải hết)
+            if not recommendations:
+                # Gợi ý random các bài chưa giải
+                unsolved_problems = Problem.objects.filter(
+                    is_public=True,
+                    is_synced_to_domjudge=True
+                ).exclude(id__in=solved_ids)[:n_recommendations]
+                
+                recommendations = [
+                    {
+                        'problem_id': p.id,
+                        'title': p.title,
+                        'difficulty': p.difficulty,
+                        'rating': p.rating,
+                        'tags': [tag.name for tag in p.tags.all()],
+                        'score': 0.0
+                    }
+                    for p in unsolved_problems
+                ]
+            
+            return Response({
+                'user_id': user.id,
+                'username': user.username,
+                'user_rating': user.current_rating,
+                'solved_count': len(solved_ids),
+                'strategy': strategy,
+                'recommendations': recommendations
+            })
+            
+        except Exception as e:
+            return Response({
+                'error': f'Failed to generate recommendations: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

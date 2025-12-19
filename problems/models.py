@@ -27,6 +27,10 @@ class Problem(models.Model):
     
     # Constraints
     difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES, default="medium")
+    rating = models.IntegerField(
+        default=1500,
+        validators=[MinValueValidator(800), MaxValueValidator(3000)]
+    )
     time_limit_ms = models.IntegerField(
         default=1000, 
         validators=[MinValueValidator(100), MaxValueValidator(30000)]

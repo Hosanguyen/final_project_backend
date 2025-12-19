@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'contests',
     'quizzes',
     'common',
+    'django_q',
 ]
 
 MIDDLEWARE = [
@@ -217,3 +218,20 @@ VNPAY_HASH_SECRET = os.getenv('VNPAY_HASH_SECRET', '')  # Secret key
 VNPAY_URL = os.getenv('VNPAY_URL', 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html')  # URL thanh toán VNPay
 VNPAY_RETURN_URL = os.getenv('VNPAY_RETURN_URL', 'https://josephine-unsurmising-importantly.ngrok-free.dev/api/payment/vnpay/return/')  # URL callback từ VNPay
 VNPAY_API_URL = os.getenv('VNPAY_API_URL', 'https://sandbox.vnpayment.vn/merchant_webapi/api/transaction')  # URL API VNPay
+
+# ==========================================
+# DJANGO-Q2 CONFIGURATION
+# ==========================================
+Q_CLUSTER = {
+    'name': 'recommendation_cluster',
+    'workers': 2,
+    'recycle': 500,
+    'timeout': 3600,  # 1 hour timeout for training
+    'retry': 3660,  # retry must be > timeout (3600 + 60 seconds)
+    'compress': True,
+    'save_limit': 250,
+    'queue_limit': 50,
+    'label': 'Recommendation System',
+    'orm': 'default',  # Use Django ORM instead of Redis
+    'catch_up': False,  # Don't catch up on missed schedules
+}

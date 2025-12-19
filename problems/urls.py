@@ -3,7 +3,8 @@ from .views import (
     ProblemListCreateView, ProblemDetailView,
     ProblemTestCasesView, TestCaseDetailView,
     ProblemStatisticsView,
-    SubmissionCreateView, SubmissionListView, SubmissionDetailView
+    SubmissionCreateView, SubmissionListView, SubmissionDetailView,
+    ProblemRecommendationView
 )
 from .user_profile_views import (
     UserProblemsView, UserSubmissionsView, UserRegisteredContestsView,
@@ -14,6 +15,9 @@ urlpatterns = [
     # Problem CRUD
     path('', ProblemListCreateView.as_view(), name='problem-list-create'),
     path('<int:id>/', ProblemDetailView.as_view(), name='problem-detail'),
+    
+    # Recommendations
+    path('recommendations/', ProblemRecommendationView.as_view(), name='problem-recommendations'),
     
     # Test Cases
     path('<int:problem_id>/test-cases/', ProblemTestCasesView.as_view(), name='problem-test-cases'),
