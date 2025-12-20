@@ -123,27 +123,62 @@ class DOMjudgeService:
         return file_obj
     
     def _create_problem_package(self, problem):
-        """Tạo ZIP package theo format DOMjudge"""
+        """Tạo ZIP package theo format DOMjudge 2025-09"""
+        import uuid
+        import yaml
+        
         zip_buffer = BytesIO()
         
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            # Add problem.yaml
-#             problem_yaml = f"""name: '{problem.title}'
-# timelimit: {problem.time_limit_ms / 1000}
-# """   
-            problem_yaml = ""
-            problem_yaml += f"name: \"{problem.title}\"\n"
-            problem_yaml += "limits:\n"
-            # problem_yaml += f"  time_limit: {problem.time_limit_ms / 1000}\n"
-            problem_yaml += f"  memory: {problem.memory_limit_kb / 1024}\n"  # memory in MiB
-            zip_file.writestr('problem.yaml', problem_yaml)
+            # 1. Create problem.yaml theo format 2025-09
+            problem_config = {
+                'problem_format_version': '2025-09',
+                'name': problem.title,
+                'uuid': str(uuid.uuid5(uuid.NAMESPACE_DNS, problem.slug)),
+                'type': 'pass-fail',
+                'limits': {
+                    'time_limit': round(problem.time_limit_ms / 1000.0, 2),
+                    'memory': int(problem.memory_limit_kb / 1024),  # Convert to MiB
+                },
+                'validation': problem.validation_type if problem.validation_type else 'default',
+            }
+            
+            # Add allowed languages if specified
+            if problem.allowed_languages.exists():
+                problem_config['languages'] = [lang.code for lang in problem.allowed_languages.all()]
+            
+            # Write problem.yaml
+            yaml_content = yaml.dump(problem_config, default_flow_style=False, allow_unicode=True)
+            zip_file.writestr('problem.yaml', yaml_content)
+            
+            # 2. Add .timelimit file (backward compatibility)
             zip_file.writestr('.timelimit', str(round(problem.time_limit_ms / 1000, 2)))
             
-            # Add statement (optional)
+            # 3. Add statement if available
             if problem.statement_text:
-                zip_file.writestr('problem.pdf', problem.statement_text)  # hoặc HTML
+                zip_file.writestr('problem_statement/problem.html', problem.statement_text)
             
-            # Add test cases
+            # 4. Add custom validator if validation_type is 'custom'
+            if problem.validation_type == 'custom' and problem.custom_validator:
+                # Create output_validators directory with validator script
+                validator_content = problem.custom_validator
+                zip_file.writestr('output_validators/validator/validator.py', validator_content)
+                
+                # Add build script for Python validator
+                build_script = "#!/bin/sh\n# Python validator - no build needed\nexit 0\n"
+                zip_file.writestr('output_validators/validator/build', build_script)
+                
+                # Add run script for Python validator
+                # Use absolute path relative to script location
+                run_script = """#!/bin/sh
+# Get the directory where this script is located
+DIR="$(cd "$(dirname "$0")" && pwd)"
+# Run the validator with Python3
+exec python3 "$DIR/validator.py" "$@"
+"""
+                zip_file.writestr('output_validators/validator/run', run_script)
+            
+            # 5. Add test cases
             sample_count = 1
             secret_count = 1
             

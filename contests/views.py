@@ -144,7 +144,7 @@ class ContestDetailView(APIView):
             contest = Contest.objects.get(id=contest_id)
             
             # Chặn truy cập contest practice từ link trực tiếp
-            if contest.slug == 'practice':
+            if contest.slug == 'practice' and not request.user.has_role('admin'):
                 return Response({
                     'error': 'Practice contest cannot be accessed directly. Please use /practice page.',
                     'redirect_to': '/practice'
