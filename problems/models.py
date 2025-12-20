@@ -44,6 +44,23 @@ class Problem(models.Model):
     source = models.CharField(max_length=255, null=True, blank=True)
     is_public = models.BooleanField(default=False)
     
+    # Validation
+    VALIDATION_CHOICES = [
+        ("default", "Default (exact match)"),
+        ("custom", "Custom validator"),
+    ]
+    validation_type = models.CharField(
+        max_length=20, 
+        choices=VALIDATION_CHOICES, 
+        default="default",
+        help_text="Validation method: 'default' for exact match, 'custom' for custom validator"
+    )
+    custom_validator = models.TextField(
+        null=True, 
+        blank=True,
+        help_text="Custom validator code (Python script) - only used when validation_type='custom'"
+    )
+    
     # Editorial
     editorial_text = models.TextField(null=True, blank=True, help_text="Lời giải (HTML)")
     editorial_file = models.ForeignKey(

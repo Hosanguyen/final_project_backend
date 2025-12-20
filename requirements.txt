@@ -17,6 +17,10 @@ python-dotenv==1.0.1
 # Utilities
 pytz==2023.3
 Pillow==10.1.0
+PyYAML==6.0.1
+
+# Task Queue
+django-q2==1.6.2
 
 # Production Server
 gunicorn==21.2.0 # Linux
