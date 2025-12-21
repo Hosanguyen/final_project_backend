@@ -159,6 +159,37 @@ def create_default_role_permissions(sender, **kwargs):
                 permission=permission
             )
 
+def create_default_admin_user(sender, **kwargs):
+    """Create default admin user and assign admin role"""
+    from users.models import User, Role, UserRole
+    import os
+    
+    username = os.environ.get('DJANGO_SUPERUSER_USERNAME', 'admin')
+    email = os.environ.get('DJANGO_SUPERUSER_EMAIL', 'admin@example.com')
+    password = os.environ.get('DJANGO_SUPERUSER_PASSWORD', 'admin123')
+    
+    # Create admin user if not exists
+    if not User.objects.filter(username=username).exists():
+        user = User.objects.create(
+            username=username,
+            email=email
+        )
+        user.set_password(password)
+        user.save()
+        print(f"Admin user '{username}' created successfully!")
+    else:
+        user = User.objects.get(username=username)
+        print(f"Admin user '{username}' already exists")
+    
+    # Assign admin role to user
+    admin_role = Role.objects.filter(name="admin").first()
+    if admin_role:
+        UserRole.objects.get_or_create(
+            user=user,
+            role=admin_role
+        )
+        print(f"Admin role assigned to user '{username}'")
+
 def create_practice_contest(sender, **kwargs):
     """Create a practice contest and sync with DOMjudge"""
     from contests.models import Contest
@@ -171,9 +202,10 @@ def create_practice_contest(sender, **kwargs):
     
     # Create practice contest
     now = timezone.now()
-    # Set start time to 1 year ago and end time to 1 year from now
-    start_time = now - timedelta(days=365)
-    end_time = now + timedelta(days=365)
+    # Set start time to current time (not in past - DOMjudge might not accept past dates)
+    start_time = now
+    # Set end time to 2 years from now for practice
+    end_time = now + timedelta(days=365 * 2)
     
     practice_contest = Contest.objects.create(
         slug="practice",
@@ -210,11 +242,17 @@ def create_practice_contest(sender, **kwargs):
         duration_hours = 365 * 2 * 24
         duration_str = f"{duration_hours}:00:00"
         
+        # Format start_time for DOMjudge (must match format: YYYY-MM-DD HH:MM:SS UTC)
+        # Convert to UTC and format without timezone info
+        from django.utils import timezone as tz
+        start_utc = practice_contest.start_at.astimezone(tz.utc)
+        start_time_str = start_utc.strftime('%Y-%m-%d %H:%M:%S UTC')
+        
         contest_data = {
             'id': practice_contest.slug,
             'name': practice_contest.title,
             'formal_name': practice_contest.title,
-            'start_time': practice_contest.start_at.isoformat(),
+            'start_time': start_time_str,
             'duration': duration_str,
             'penalty_time': practice_contest.penalty_time
         }
@@ -243,6 +281,10 @@ class Command(BaseCommand):
         self.stdout.write('Assigning permissions to roles...')
         create_default_role_permissions(sender=None)
         self.stdout.write(self.style.SUCCESS('✓ Role permissions assigned'))
+        
+        self.stdout.write('Creating default admin user...')
+        create_default_admin_user(sender=None)
+        self.stdout.write(self.style.SUCCESS('✓ Admin user created and assigned admin role'))
         
         self.stdout.write('Creating practice contest...')
         create_practice_contest(sender=None)
