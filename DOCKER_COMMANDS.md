@@ -137,6 +137,20 @@ docker exec domjudge_mariadb mysql -udomjudge -pdjpw domjudge -e "SELECT * FROM 
 docker exec domjudge_mariadb mysql -udomjudge -pdjpw domjudge -e "SHOW TABLES"
 ```
 
+### DOMjudge Admin Credentials
+```powershell
+# Lấy admin password (từ logs khi container khởi động lần đầu)
+docker logs domjudge_server 2>&1 | Select-String -Pattern "admin.*password" | Select-Object -First 5
+
+# Lấy judgehost password
+docker logs domjudge_server 2>&1 | Select-String -Pattern "judgehost.*password" | Select-Object -First 5
+
+# Access DOMjudge web interface
+# URL: http://localhost:8088/ hoặc http://localhost/domjudge/
+# Username: admin
+# Password: (lấy từ command trên)
+```
+
 ## 📁 File Operations
 
 ### Copy Files To/From Containers
@@ -265,6 +279,12 @@ docker exec django_mysql mysql -uroot -prootpw -e "USE dbtest_finalproject; SELE
 
 # Clear Django cache (nếu có redis)
 docker exec django_backend python manage.py shell -c "from django.core.cache import cache; cache.clear()"
+
+# Lấy DOMjudge admin password
+docker logs domjudge_server 2>&1 | Select-String "Initial admin password"
+
+# Lấy Django admin credentials (từ .env)
+Get-Content .env | Select-String "DJANGO_SUPERUSER"
 ```
 
 ## 🎯 Production Operations
