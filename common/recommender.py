@@ -98,29 +98,44 @@ class ProductionRecommender:
         # Chuyển tags thành binary vectors
         self.mlb = MultiLabelBinarizer()
         content_vectors = self.mlb.fit_transform(self.problems_snapshot['tags'])
-        self.content_vectors = pd.DataFrame(
-            content_vectors,
-            index=self.problems_snapshot.index,
-            columns=self.mlb.classes_
-        )
         
-        # Train KNN
-        n_samples = len(self.problems_snapshot)
-        effective_n = min(50, n_samples)
-        
-        self.content_knn = NearestNeighbors(
-            n_neighbors=effective_n,
-            metric='cosine',
-            algorithm='brute'
-        )
-        self.content_knn.fit(content_vectors)
-        
-        print(f"   ✓ Content-Based trained trong {time.time() - t_start:.2f}s")
-        print(f"   ✓ Tags detected: {list(self.mlb.classes_)}")
+        # Kiểm tra nếu không có tags nào
+        if content_vectors.shape[1] == 0:
+            print("   ⚠ Warning: Không có tags nào, skip Content-Based model")
+            print("   → Thêm tags cho problems để sử dụng Content-Based recommendations")
+            self.content_vectors = None
+            self.content_knn = None
+        else:
+            self.content_vectors = pd.DataFrame(
+                content_vectors,
+                index=self.problems_snapshot.index,
+                columns=self.mlb.classes_
+            )
+            
+            # Train KNN
+            n_samples = len(self.problems_snapshot)
+            effective_n = min(50, n_samples)
+            
+            self.content_knn = NearestNeighbors(
+                n_neighbors=effective_n,
+                metric='cosine',
+                algorithm='brute'
+            )
+            self.content_knn.fit(content_vectors)
+            
+            print(f"   ✓ Content-Based trained trong {time.time() - t_start:.2f}s")
+            print(f"   ✓ Tags detected: {list(self.mlb.classes_)}")
         
         # ============ 2. COLLABORATIVE FILTERING ============
         print("\n[2/2] Training Collaborative Filtering Model...")
         t_start = time.time()
+        
+        # Kiểm tra nếu không có submissions
+        if submissions_df.empty:
+            print("   ⚠ Warning: Không có submissions, skip Collaborative Filtering")
+            self.collab_knn = None
+            self.interaction_matrix = None
+            return True
         
         # Chỉ lấy AC submissions cho valid problems
         ac_subs = submissions_df[submissions_df['status'] == 'ac'].copy()
@@ -128,7 +143,7 @@ class ProductionRecommender:
         ac_subs = ac_subs[ac_subs['problem_id'].isin(valid_problem_ids)]
         
         if ac_subs.empty:
-            print("[Warning] Không có AC submissions, chỉ dùng Content-Based!")
+            print("   ⚠ Warning: Không có AC submissions, chỉ dùng Content-Based!")
             self.collab_knn = None
             self.interaction_matrix = None
             return True
