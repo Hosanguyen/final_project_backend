@@ -62,3 +62,58 @@ Một số bảng chính:
 - **Database (MySQL)**: lưu trữ dữ liệu, hỗ trợ truy vấn nhanh.  
 
 ---
+
+## Hướng dẫn triển khai nhanh (Docker)
+
+### Bước 1: Build DOMjudge để lấy admin password
+```powershell
+cd backend
+docker-compose -f docker-compose.production.yml up -d db domserver
+```
+
+Đợi 30-60 giây để DOMjudge khởi tạo, sau đó lấy admin password:
+```powershell
+docker logs domjudge_server 2>&1 | Select-String "Initial admin password"
+```
+
+### Bước 2: Cập nhật password vào file .env
+Mở file `.env` và cập nhật:
+```env
+DOMJUDGE_USERNAME=admin
+DOMJUDGE_PASSWORD=<password_vừa_lấy_được>
+```
+
+### Bước 3: Build toàn bộ hệ thống
+```powershell
+docker-compose -f docker-compose.production.yml up -d
+```
+
+### Bước 4: Khởi tạo dữ liệu
+```powershell
+# Tạo admin user và practice contest
+docker exec django_backend python manage.py init_permissions
+```
+
+### Truy cập hệ thống
+- **Django Admin**: http://localhost/admin/ (username: `admin`, password: `admin123`)
+- **DOMjudge**: http://localhost/domjudge/ (username: `admin`, password: `<từ bước 1>`)
+- **API Docs**: http://localhost/api/
+
+### Lệnh hữu ích
+```powershell
+# Xem logs Django
+docker logs -f django_backend
+
+# Xem logs DOMjudge
+docker logs -f domjudge_server
+
+# Restart toàn bộ hệ thống
+docker-compose -f docker-compose.production.yml restart
+
+# Dừng hệ thống
+docker-compose -f docker-compose.production.yml down
+
+# Xem thêm: DOCKER_COMMANDS.md
+```
+
+---

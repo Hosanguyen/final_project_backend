@@ -90,16 +90,21 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
 MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', '12345')
+MYSQL_ROOT_PASSWORD = os.getenv('MYSQL_ROOT_PASSWORD', '12345')
 MAIN_DB_NAME = os.getenv('MAIN_DB_NAME', 'finalproject')
+DJANGO_DB_HOST = os.getenv('DJANGO_DB_HOST', 'localhost')
+DJANGO_DB_PORT = os.getenv('DJANGO_DB_PORT', '3306')
+DOMJUDGE_DB_HOST = os.getenv('DOMJUDGE_DB_HOST', 'localhost')
+DOMJUDGE_DB_PORT = os.getenv('DOMJUDGE_DB_PORT', '13306')
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': MAIN_DB_NAME,       
         'USER': 'root',        
-        'PASSWORD': '12345', 
-        'HOST': 'localhost',   
-        'PORT': '3306',       
+        'PASSWORD': MYSQL_ROOT_PASSWORD, 
+        'HOST': DJANGO_DB_HOST,   
+        'PORT': DJANGO_DB_PORT,       
         'OPTIONS': {
             'charset': 'utf8mb4',
         },
@@ -109,8 +114,8 @@ DATABASES = {
         'NAME': 'domjudge',
         'USER': 'domjudge',
         'PASSWORD': MYSQL_PASSWORD,
-        'HOST': 'localhost',
-        'PORT': '13306',
+        'HOST': DOMJUDGE_DB_HOST,
+        'PORT': DOMJUDGE_DB_PORT,
     },
 }
 
