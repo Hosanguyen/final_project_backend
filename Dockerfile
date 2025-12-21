@@ -31,9 +31,10 @@ COPY . /app/
 # Create directories for media and static files
 RUN mkdir -p /app/media/images /app/media/files /app/media/models /app/static
 
-# Copy entrypoint script
+# Copy entrypoint script and fix line endings
 COPY docker-entrypoint.sh /app/
-RUN chmod +x /app/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /app/docker-entrypoint.sh && \
+    chmod +x /app/docker-entrypoint.sh
 
 # Expose port
 EXPOSE 8000
