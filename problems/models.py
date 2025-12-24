@@ -27,6 +27,10 @@ class Problem(models.Model):
     
     # Constraints
     difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES, default="medium")
+    rating = models.IntegerField(
+        default=1500,
+        validators=[MinValueValidator(800), MaxValueValidator(3000)]
+    )
     time_limit_ms = models.IntegerField(
         default=1000, 
         validators=[MinValueValidator(100), MaxValueValidator(30000)]
@@ -39,6 +43,23 @@ class Problem(models.Model):
     # Metadata
     source = models.CharField(max_length=255, null=True, blank=True)
     is_public = models.BooleanField(default=False)
+    
+    # Validation
+    VALIDATION_CHOICES = [
+        ("default", "Default (exact match)"),
+        ("custom", "Custom validator"),
+    ]
+    validation_type = models.CharField(
+        max_length=20, 
+        choices=VALIDATION_CHOICES, 
+        default="default",
+        help_text="Validation method: 'default' for exact match, 'custom' for custom validator"
+    )
+    custom_validator = models.TextField(
+        null=True, 
+        blank=True,
+        help_text="Custom validator code (Python script) - only used when validation_type='custom'"
+    )
     
     # Editorial
     editorial_text = models.TextField(null=True, blank=True, help_text="Lời giải (HTML)")
@@ -150,11 +171,14 @@ class Submissions(models.Model):
     problem = models.ForeignKey(Problem, on_delete=models.CASCADE, related_name="submissions")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="submissions")
     language = models.ForeignKey(Language, on_delete=models.SET_NULL, null=True, related_name="submissions")
+    contest = models.ForeignKey('contests.Contest', on_delete=models.CASCADE, null=True, blank=True, related_name="submissions", help_text="Contest this submission belongs to (null for practice mode)")
     code_file = models.ForeignKey(File, on_delete=models.SET_NULL, null=True, related_name="submissions")
     code_text = models.TextField(null=True, blank=True)
     submitted_at = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=50, null=True, blank=True)
     score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    test_passed = models.IntegerField(null=True, blank=True, help_text="Number of test cases passed (for OI mode)")
+    test_total = models.IntegerField(null=True, blank=True, help_text="Total number of test cases (for OI mode)")
     feedback = models.TextField(null=True, blank=True)
     domjudge_submission_id = models.BigIntegerField(null=True, blank=True)
 

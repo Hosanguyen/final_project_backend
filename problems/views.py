@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from django.utils import timezone
 
-from .models import Problem, TestCase
+from .models import Problem, TestCase, Submissions
 from .serializers import (
     ProblemListSerializer, ProblemDetailSerializer,
     ProblemCreateSerializer, ProblemUpdateSerializer,
@@ -391,15 +391,89 @@ class ProblemStatisticsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, id):
-        problem = get_object_or_404(Problem, id=id)
+        from contests.models import Contest, ContestProblem
+        from django.db.models import Count, Avg, Max, Min
+        from datetime import datetime, timedelta
         
-        # TODO: Implement statistics từ Submission model
+        problem = get_object_or_404(Problem, id=id)
+        contest_id = request.query_params.get('contest_id')
+        
+        # Base queryset for submissions
+        submissions_qs = Submissions.objects.filter(problem=problem)
+        
+        # Filter by contest if provided
+        if contest_id:
+            submissions_qs = submissions_qs.filter(contest_id=contest_id)
+        
+        # Total submissions
+        total_submissions = submissions_qs.count()
+        
+        # Submissions by status
+        by_status = list(submissions_qs.values('status')
+                        .annotate(count=Count('id'))
+                        .order_by('-count'))
+        
+        # Accepted submissions
+        accepted_submissions = submissions_qs.filter(status='correct').count()
+        acceptance_rate = round((accepted_submissions / total_submissions * 100), 2) if total_submissions > 0 else 0
+        
+        # Unique solvers
+        unique_solvers = submissions_qs.filter(status='correct').values('user').distinct().count()
+        
+        # Submissions over time (last 30 days)
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        submissions_by_date = submissions_qs.filter(
+            submitted_at__gte=thirty_days_ago
+        ).extra(
+            select={'date': 'DATE(submitted_at)'}
+        ).values('date').annotate(
+            count=Count('id')
+        ).order_by('date')
+        
+        # Top solvers (users with AC)
+        top_solvers = list(
+            submissions_qs.filter(status='correct')
+            .values('user__username', 'user__full_name')
+            .annotate(
+                ac_count=Count('id'),
+                first_ac=Min('submitted_at')
+            )
+            .order_by('-ac_count', 'first_ac')[:10]
+        )
+        
+        # Get contests this problem appears in (only if not filtering by specific contest)
+        contests_list = []
+        if not contest_id:
+            contest_problems = ContestProblem.objects.filter(problem=problem).select_related('contest')
+            for cp in contest_problems:
+                contest_submissions = Submissions.objects.filter(problem=problem, contest=cp.contest)
+                contest_ac = contest_submissions.filter(status='correct').count()
+                contest_total = contest_submissions.count()
+                
+                contests_list.append({
+                    'contest_id': cp.contest.id,
+                    'contest_title': cp.contest.title,
+                    'alias': cp.alias,
+                    'point': float(cp.point),
+                    'total_submissions': contest_total,
+                    'accepted_submissions': contest_ac,
+                })
+        
         stats = {
             "problem_id": problem.id,
             "problem_title": problem.title,
+            "contest_id": contest_id,
             "is_synced_to_domjudge": problem.is_synced_to_domjudge,
             "last_synced_at": problem.last_synced_at,
             "test_case_count": problem.test_cases.count(),
+            "total_submissions": total_submissions,
+            "accepted_submissions": accepted_submissions,
+            "acceptance_rate": acceptance_rate,
+            "unique_solvers": unique_solvers,
+            "by_status": by_status,
+            "submissions_by_date": list(submissions_by_date),
+            "top_solvers": top_solvers,
+            "contests": contests_list,
         }
         
         return Response(stats)
@@ -426,6 +500,7 @@ class SubmissionCreateView(APIView):
         
         language_id = serializer.validated_data['language_id']
         code = serializer.validated_data['code']
+        contest_id = serializer.validated_data.get('contest_id')
         
         # Kiểm tra language có được phép không
         language = get_object_or_404(Language, id=language_id)
@@ -440,11 +515,18 @@ class SubmissionCreateView(APIView):
                 "error": "Problem chưa được đồng bộ với DOMjudge"
             }, status=status.HTTP_400_BAD_REQUEST)
         
+        # Lấy contest object nếu có
+        contest = None
+        if contest_id:
+            from contests.models import Contest
+            contest = get_object_or_404(Contest, id=contest_id)
+        
         # Tạo submission trong DB
         submission = Submissions.objects.create(
             problem=problem,
             user=request.user,
             language=language,
+            contest=contest,
             code_text=code,
             status="pending"
         )
@@ -452,7 +534,7 @@ class SubmissionCreateView(APIView):
         # Submit lên DOMjudge
         try:
             domjudge_service = DOMjudgeService()
-            contest_id = request.data.get('contest_id') or 'practice'  # Optional
+            contest_id = contest.slug or 'practice'  # Optional
             team_id = request.data.get('team_id') or 'exteam'  # Optional
             domjudge_response = domjudge_service.submit_code(
                 problem=problem,
@@ -481,8 +563,24 @@ class SubmissionCreateView(APIView):
             submission.feedback = str(e)
             submission.save()
             
+            # Parse error message to provide user-friendly feedback
+            error_message = str(e)
+            user_friendly_message = "Không thể kết nối đến hệ thống chấm bài. Vui lòng thử lại sau."
+            
+            # Check for common error patterns
+            if "Connection" in error_message or "connection" in error_message:
+                user_friendly_message = "Hệ thống chấm bài tạm thời không khả dụng. Vui lòng thử lại sau."
+            elif "timeout" in error_message.lower():
+                user_friendly_message = "Kết nối đến hệ thống chấm bài quá chậm. Vui lòng thử lại."
+            elif "401" in error_message or "403" in error_message:
+                user_friendly_message = "Lỗi xác thực với hệ thống chấm bài. Vui lòng liên hệ quản trị viên."
+            elif "404" in error_message:
+                user_friendly_message = "Không tìm thấy bài toán trên hệ thống chấm bài."
+            elif "500" in error_message:
+                user_friendly_message = "Hệ thống chấm bài gặp lỗi nội bộ. Vui lòng thử lại sau."
+            
             return Response({
-                "error": f"Submit to DOMjudge failed: {str(e)}"
+                "error": user_friendly_message
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -496,11 +594,24 @@ class SubmissionListView(APIView):
     def get(self, request, problem_id=None):
         from .models import Submissions
         from .serializers import SubmissionListSerializer
+        from contests.models import Contest
         
         if problem_id:
             submissions = Submissions.objects.filter(problem_id=problem_id)
         else:
             submissions = Submissions.objects.all()
+        
+        # Filter by contest if provided
+
+        contest_id = request.query_params.get('contest_id')
+        if contest_id:
+            submissions = submissions.filter(contest_id=contest_id)
+        else:
+            # Nếu không truyền contest_id, lọc submissions có contest_id rỗng hoặc contest có slug là "practice"
+            practice_contests = Contest.objects.filter(slug='practice').values_list('id', flat=True)
+            submissions = submissions.filter(
+                Q(contest_id__isnull=True) | Q(contest_id__in=practice_contests)
+            )
         
         # Filter by user (chỉ xem submission của mình, trừ admin)
         if not request.user.is_staff:
@@ -547,15 +658,30 @@ class SubmissionListView(APIView):
             if submission.domjudge_submission_id:
                 try:
                     # Lấy judgement từ DOMjudge
-                    judgement = domjudge_service.get_judgement(
-                        submission.domjudge_submission_id,
-                        contest_id=contest_id
+                    judgement = domjudge_service.get_judgement_summary(
+                        submission.domjudge_submission_id
                     )
                     
                     if judgement and judgement.get('valid'):
                         # Cập nhật status từ judgement_type_id
                         judgement_type = judgement.get('judgement_type_id', 'unknown')
                         submission.status = judgement_type.lower()
+                        
+                        # Lấy chi tiết test cases để tính test_passed và test_total
+                        try:
+                            detailed_results = domjudge_service.get_detailed_judging_results(
+                                submission.domjudge_submission_id
+                            )
+                            
+                            if detailed_results and 'test_cases' in detailed_results:
+                                test_cases = detailed_results['test_cases']
+                                submission.test_total = len(test_cases)
+                                submission.test_passed = sum(
+                                    1 for tc in test_cases 
+                                    if tc.get('verdict', '').lower() == 'correct'
+                                )
+                        except Exception as e:
+                            print(f"Failed to get detailed results: {str(e)}")
                         
                         # Cập nhật score (nếu AC thì 100, không thì 0)
                         if judgement_type == 'AC':
@@ -566,6 +692,17 @@ class SubmissionListView(APIView):
                         # Cập nhật feedback
                         submission.feedback = f"Max run time: {judgement.get('max_run_time', 0)}s"
                         submission.save()
+                        
+                        # Update contest ranking if submission is for a contest
+                        if submission.contest:
+                            from contests.ranking_service import ContestRankingService
+                            try:
+                                ContestRankingService.update_user_ranking(
+                                    submission.contest.id,
+                                    submission.user.id
+                                )
+                            except Exception as e:
+                                print(f"Failed to update ranking: {str(e)}")
                 
                 except Exception as e:
                     print(f"Failed to sync submission {submission.id}: {str(e)}")
@@ -608,6 +745,22 @@ class SubmissionDetailView(APIView):
                     judgement_type = judgement.get('judgement_type_id', 'unknown')
                     submission.status = judgement_type.lower()
                     
+                    # Lấy chi tiết test cases để tính test_passed và test_total
+                    try:
+                        detailed_results = domjudge_service.get_detailed_judging_results(
+                            submission.domjudge_submission_id
+                        )
+                        
+                        if detailed_results and 'test_cases' in detailed_results:
+                            test_cases = detailed_results['test_cases']
+                            submission.test_total = len(test_cases)
+                            submission.test_passed = sum(
+                                1 for tc in test_cases 
+                                if tc.get('verdict', '').lower() == 'correct'
+                            )
+                    except Exception as e:
+                        print(f"Failed to get detailed results: {str(e)}")
+                    
                     # Cập nhật score
                     if judgement_type == 'AC':
                         submission.score = 100.00
@@ -623,6 +776,17 @@ class SubmissionDetailView(APIView):
                     ]
                     submission.feedback = "\n".join(feedback_parts)
                     submission.save()
+                    
+                    # Update contest ranking if submission is for a contest
+                    if submission.contest:
+                        from contests.ranking_service import ContestRankingService
+                        try:
+                            ContestRankingService.update_user_ranking(
+                                submission.contest.id,
+                                submission.user.id
+                            )
+                        except Exception as e:
+                            print(f"Failed to update ranking: {str(e)}")
             
             except Exception as e:
                 print(f"Failed to sync submission result: {str(e)}")
@@ -630,3 +794,106 @@ class SubmissionDetailView(APIView):
         from .serializers import SubmissionDetailSerializer
         serializer = SubmissionDetailSerializer(submission)
         return Response(serializer.data)
+
+
+class ProblemRecommendationView(APIView):
+    """
+    GET: Lấy danh sách bài toán được gợi ý cho user hiện tại
+    Dựa trên model đã train và lịch sử giải bài của user
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        import pickle
+        import os
+        from django.conf import settings
+        
+        try:
+            user = request.user
+            
+            # Lấy tham số
+            n_recommendations = int(request.query_params.get('limit', 10))
+            strategy = request.query_params.get('strategy', 'similar')  # similar or challenging
+            
+            if strategy not in ['similar', 'challenging']:
+                return Response({
+                    'error': 'Invalid strategy. Use "similar" or "challenging"'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Load model
+            model_path = os.path.join(settings.BASE_DIR, 'media', 'models', 'recommendation_model.pkl')
+            
+            if not os.path.exists(model_path):
+                return Response({
+                    'error': 'Recommendation model not found. Please train the model first.',
+                    'hint': 'Run: python manage.py train_recommendation'
+                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            
+            with open(model_path, 'rb') as f:
+                model_data = pickle.load(f)
+            
+            # Khôi phục recommender
+            from common.recommender import ProductionRecommender
+            recommender = ProductionRecommender()
+            recommender.__dict__.update(model_data)
+            
+            # Lấy danh sách bài đã giải của user (AC only)
+            solved_submissions = Submissions.objects.filter(
+                user=user,
+                status='ac',
+                contest__isnull=True  # Practice mode only
+            ).values_list('problem_id', flat=True).distinct()
+            
+            solved_ids = list(solved_submissions)
+            
+            # Lấy danh sách bài public và active
+            valid_problem_ids = set(
+                Problem.objects.filter(
+                    is_public=True,
+                    is_synced_to_domjudge=True
+                ).values_list('id', flat=True)
+            )
+            
+            # Gọi recommend
+            recommendations = recommender.recommend(
+                user_id=user.id,
+                solved_ids=solved_ids,
+                valid_problem_ids_set=valid_problem_ids,
+                n_recommendations=n_recommendations,
+                strategy=strategy
+            )
+            
+            # Nếu không có gợi ý (cold start hoặc đã giải hết)
+            if not recommendations:
+                # Gợi ý random các bài chưa giải
+                unsolved_problems = Problem.objects.filter(
+                    is_public=True,
+                    is_synced_to_domjudge=True
+                ).exclude(id__in=solved_ids)[:n_recommendations]
+                
+                recommendations = [
+                    {
+                        'problem_id': p.id,
+                        'title': p.title,
+                        'difficulty': p.difficulty,
+                        'rating': p.rating,
+                        'tags': [tag.name for tag in p.tags.all()],
+                        'score': 0.0
+                    }
+                    for p in unsolved_problems
+                ]
+            
+            return Response({
+                'user_id': user.id,
+                'username': user.username,
+                'user_rating': user.current_rating,
+                'solved_count': len(solved_ids),
+                'strategy': strategy,
+                'recommendations': recommendations
+            })
+            
+        except Exception as e:
+            return Response({
+                'error': f'Failed to generate recommendations: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

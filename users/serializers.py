@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, PermissionCategory, Permission, Role, UserRole
+from .models import User, PermissionCategory, Permission, Role, UserRole, ContestRatingChange
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
@@ -17,7 +17,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    username = serializers.CharField()
+    username = serializers.CharField(help_text="Tên đăng nhập hoặc email")
     password = serializers.CharField(write_only=True)
 
 class UserListSerializer(serializers.ModelSerializer):
@@ -31,29 +31,60 @@ class AdminUpdateUserSerializer(serializers.ModelSerializer):
         fields = ["email", "full_name", "avatar_url", "description", "dob", "gender", "phone", "address"]
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    roles = serializers.SerializerMethodField()
+    permissions = serializers.SerializerMethodField()
+    
     class Meta:
         model = User
-        fields = ["id", "username", "email", "full_name", "avatar_url", "description", "dob", "gender", "phone", "address"]
+        fields = ["id", "username", "email", "full_name", "avatar_url", "description", 
+                  "dob", "gender", "phone", "address", "roles", "permissions"]
+    
+    def get_roles(self, obj):
+        """Trả về danh sách roles của user"""
+        return [{"id": role.id, "name": role.name} for role in obj.roles.all()]
+    
+    def get_permissions(self, obj):
+        """Trả về danh sách permissions của user từ các roles"""
+        permissions = set()
+        for role in obj.roles.all():
+            for perm in role.permissions.all():
+                permissions.add(perm.code)
+        return list(permissions)
 
 class UserResetPasswordSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["old_password", "password", "password_confirm"]
+        fields = ["current_password", "new_password"]
     
-    old_password = serializers.CharField(write_only=True)
-    password = serializers.CharField(write_only=True)
-    password_confirm = serializers.CharField(write_only=True)
+    current_password = serializers.CharField(write_only=True, required=True)
+    new_password = serializers.CharField(write_only=True, required=True, min_length=6)
+
+    def validate_current_password(self, value):
+        user = self.context["request"].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Mật khẩu hiện tại không đúng")
+        return value
+
+    def validate_new_password(self, value):
+        if len(value) < 6:
+            raise serializers.ValidationError("Mật khẩu mới phải có ít nhất 6 ký tự")
+        return value
 
     def validate(self, attrs):
         user = self.context["request"].user
-        if not user.check_password(attrs["old_password"]):
-            raise serializers.ValidationError("Old password is incorrect")
-        if attrs["password"] != attrs["password_confirm"]:
-            raise serializers.ValidationError("New password and confirm password do not match")
+        current_password = attrs.get("current_password")
+        new_password = attrs.get("new_password")
+        
+        # Check if new password is the same as current password
+        if user.check_password(new_password):
+            raise serializers.ValidationError({
+                "new_password": "Mật khẩu mới không được trùng với mật khẩu hiện tại"
+            })
+        
         return attrs
     
     def update(self, instance, validated_data):
-        instance.set_password(validated_data["password"])
+        instance.set_password(validated_data["new_password"])
         instance.save()
         return instance
 
@@ -332,3 +363,83 @@ class RemoveRolesFromUserSerializer(serializers.Serializer):
         child=serializers.IntegerField(),
         required=True
     )
+
+
+# ============= RATING SERIALIZERS =============
+
+class UserRatingSerializer(serializers.ModelSerializer):
+    """Serializer cho User rating information"""
+    rank_color = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'full_name', 'avatar_url',
+            'current_rating', 'max_rating', 'rank', 'max_rank', 'rank_color',
+            'contests_participated', 'contests_won', 'total_problems_solved',
+            'last_contest_at'
+        ]
+        read_only_fields = [
+            'id', 'current_rating', 'max_rating', 'rank', 'max_rank',
+            'contests_participated', 'contests_won', 'total_problems_solved',
+            'last_contest_at'
+        ]
+    
+    def get_rank_color(self, obj):
+        return User.get_rank_color(obj.rank)
+
+
+class UserRatingSimpleSerializer(serializers.ModelSerializer):
+    """Serializer đơn giản cho rating trong user profile"""
+    rank_color = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = [
+            'current_rating', 'max_rating', 'rank', 'max_rank', 'rank_color',
+            'contests_participated', 'total_problems_solved'
+        ]
+    
+    def get_rank_color(self, obj):
+        return User.get_rank_color(obj.rank)
+
+
+class ContestRatingChangeSerializer(serializers.ModelSerializer):
+    """Serializer cho lịch sử thay đổi rating"""
+    contest_title = serializers.CharField(source='contest.title', read_only=True)
+    contest_slug = serializers.CharField(source='contest.slug', read_only=True)
+    rating_change_display = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ContestRatingChange
+        fields = [
+            'id', 'contest', 'contest_title', 'contest_slug',
+            'old_rating', 'new_rating', 'rating_change', 'rating_change_display',
+            'rank', 'solved_count', 'created_at'
+        ]
+        read_only_fields = [
+            'id', 'old_rating', 'new_rating', 'rating_change',
+            'rank', 'solved_count', 'created_at'
+        ]
+    
+    def get_rating_change_display(self, obj):
+        """Format rating change with + or - sign"""
+        if obj.rating_change >= 0:
+            return f"+{obj.rating_change}"
+        return str(obj.rating_change)
+
+
+class GlobalRankingSerializer(serializers.Serializer):
+    """Serializer cho global ranking leaderboard"""
+    rank = serializers.IntegerField()
+    user_id = serializers.IntegerField()
+    username = serializers.CharField()
+    full_name = serializers.CharField()
+    avatar_url = serializers.ImageField()
+    current_rating = serializers.IntegerField()
+    max_rating = serializers.IntegerField()
+    rank_title = serializers.CharField()
+    rank_color = serializers.CharField()
+    contests_participated = serializers.IntegerField()
+    contests_won = serializers.IntegerField()
+    total_problems_solved = serializers.IntegerField()

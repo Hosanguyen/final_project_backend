@@ -4,7 +4,7 @@ from django.conf import settings
 import json
 from io import BytesIO
 from datetime import timedelta
-
+from common.connection import execute_raw_query
 
 class DOMjudgeContestService:
     """Service to interact with DOMjudge Contest API"""
@@ -220,3 +220,25 @@ class DOMjudgeContestService:
                 
         except requests.exceptions.RequestException as e:
             raise Exception(f"Failed to remove problem from contest in DOMjudge: {str(e)}")
+
+    def update_lazy_eval_results_for_contest(self, contest):
+        """
+        Lấy tất cả lazy_eval_results của contest trong Domjudge
+        mà externalid = this_contest.slug và contest_mode = 'OI'
+        """
+        sql = """
+            UPDATE contestproblem cp
+            JOIN contest c ON cp.cid = c.cid
+            SET cp.lazy_eval_results = %s
+            WHERE c.externalid = %s
+        """
+        # execute_raw_query giống như hàm bạn đang dùng
+        new_value = 2 if contest.contest_mode == 'OI' else 1
+        rows = execute_raw_query('domjudge', sql, [new_value, contest.slug], fetch=True)
+
+        # Nếu không có kết quả
+        if not rows:
+            return []
+
+        # Trả về list lazy_eval_results
+        return [r['lazy_eval_results'] for r in rows]

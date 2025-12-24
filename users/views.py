@@ -1,8 +1,8 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, serializers
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
@@ -30,9 +30,12 @@ from .serializers import (
     UserWithRolesSerializer,
     AssignRolesToUserSerializer,
     RemoveRolesFromUserSerializer,
+    # Rating serializers
+    UserRatingSerializer,
+    ContestRatingChangeSerializer,
+    GlobalRankingSerializer,
 )
 from common.authentication import CustomJWTAuthentication
-
 
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
@@ -57,18 +60,34 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        username = serializer.validated_data["username"]
+        username_or_email = serializer.validated_data["username"]
         password = serializer.validated_data["password"]
 
+        # Try to find user by username or email
+        user = None
         try:
-            user = User.objects.get(username=username)
+            # Try to find by username first
+            user = User.objects.get(username=username_or_email)
         except User.DoesNotExist:
-            return Response({"detail": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            # If not found, try to find by email
+            try:
+                user = User.objects.get(email=username_or_email)
+            except User.DoesNotExist:
+                return Response(
+                    {"detail": "Tên đăng nhập hoặc mật khẩu không đúng"}, 
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
 
         if not user.check_password(password):
-            return Response({"detail": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response(
+                {"detail": "Tên đăng nhập hoặc mật khẩu không đúng"}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
         if not user.active:
-            return Response({"detail": "User is not active"}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response(
+                {"detail": "Tài khoản chưa được kích hoạt"}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
         # cập nhật last_login
         user.last_login_at = timezone.now()
         user.last_login_ip = request.META.get("REMOTE_ADDR")
@@ -85,6 +104,8 @@ class HelloAPIView(APIView):
     permission_classes = [IsAuthenticated]  # bắt buộc phải có token
 
     def get(self, request):
+        if request.user.has_perm('admin', 'users.read'):
+            print("User has users.read permission")
         return Response({
             "message": f"Hello, {request.user.username}! Token của bạn hợp lệ."
         })
@@ -316,9 +337,28 @@ class UserResetPasswordView(APIView):
     def put(self, request):
         user = request.user
         serializer = UserResetPasswordSerializer(user, data=request.data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
+        
+        if not serializer.is_valid():
+            # Get the first error message
+            errors = serializer.errors
+            if errors:
+                # Get first field's error
+                first_field = list(errors.keys())[0]
+                error_messages = errors[first_field]
+                error_message = error_messages[0] if isinstance(error_messages, list) else str(error_messages)
+            else:
+                error_message = "Dữ liệu không hợp lệ"
+            
+            return Response(
+                {"error": error_message}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         serializer.save()
-        return Response({"detail": "Password updated successfully"}, status=status.HTTP_200_OK)
+        return Response(
+            {"message": "Đổi mật khẩu thành công"}, 
+            status=status.HTTP_200_OK
+        )
 
 class UserAvatarView(APIView):
     authentication_classes = [CustomJWTAuthentication]
@@ -658,11 +698,145 @@ class AllRolesForSelectionView(APIView):
         serializer = RoleSimpleSerializer(roles, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-class ModelListView(APIView):
+
+# ============= GLOBAL RANKING VIEWS =============
+
+class GlobalRankingView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [AllowAny]  # Allow anyone to view global rankings
+
+    """
+    GET: Lấy bảng xếp hạng global
+    Query params:
+    - page: số trang (default=1)
+    - limit: số user mỗi trang (default=50, max=100)
+    """
+    
     def get(self, request):
-        hide_apps = ['admin', 'auth', 'contenttypes', 'sessions']
-        models = [
-            model.__name__
-            for model in apps.get_models() if model._meta.app_label not in hide_apps
-        ]
-        return Response(models)
+        from .rating_service import RatingService
+        from .models import User
+        
+        # Get pagination params
+        page = int(request.query_params.get('page', 1))
+        limit = min(int(request.query_params.get('limit', 50)), 100)  # Max 100
+        offset = (page - 1) * limit
+        
+        # Get leaderboard
+        users = RatingService.get_global_leaderboard(limit=limit, offset=offset)
+        
+        # Format data with ranking
+        ranking_data = []
+        for idx, user in enumerate(users, start=offset + 1):
+            ranking_data.append({
+                'rank': idx,
+                'user_id': user.id,
+                'username': user.username,
+                'full_name': user.full_name or user.username,
+                'avatar_url': user.avatar_url,
+                'current_rating': user.current_rating,
+                'max_rating': user.max_rating,
+                'rank_title': user.rank,
+                'rank_color': User.get_rank_color(user.rank),
+                'contests_participated': user.contests_participated,
+                'contests_won': user.contests_won,
+                'total_problems_solved': user.total_problems_solved,
+            })
+        
+        serializer = GlobalRankingSerializer(ranking_data, many=True)
+        
+        # Get total count for pagination
+        total_count = User.objects.count()
+        
+        return Response({
+            'rankings': serializer.data,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total_count,
+                'total_pages': (total_count + limit - 1) // limit
+            }
+        }, status=status.HTTP_200_OK)
+
+
+class UserRatingDetailView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    """
+    GET: Lấy thông tin rating chi tiết của user
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, user_id=None):
+        from .rating_service import RatingService
+        
+        # Nếu không có user_id, lấy user hiện tại
+        target_user_id = user_id if user_id else request.user.id
+        
+        user_rating = RatingService.get_user_rating_info(target_user_id)
+        
+        if not user_rating:
+            return Response(
+                {"detail": "User not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        serializer = UserRatingSerializer(user_rating)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class UserRatingHistoryView(APIView):
+    """
+    GET: Lấy lịch sử thay đổi rating của user
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, user_id=None):
+        from .rating_service import RatingService
+        
+        # Nếu không có user_id, lấy user hiện tại
+        target_user_id = user_id if user_id else request.user.id
+        
+        limit = min(int(request.query_params.get('limit', 50)), 100)
+        
+        rating_changes = RatingService.get_user_rating_history(target_user_id, limit=limit)
+        serializer = ContestRatingChangeSerializer(rating_changes, many=True)
+        
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class UpdateContestRatingsView(APIView):
+    """
+    POST: Update rating cho tất cả participants của một contest
+    Admin only - gọi sau khi contest kết thúc
+    """
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, contest_id):
+        from .rating_service import RatingService
+        
+        # Check if user is admin
+        if not request.user.is_staff:
+            return Response(
+                {"detail": "Only admin can update contest ratings"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        updated_count = RatingService.update_contest_ratings(contest_id)
+        
+        if updated_count == 0:
+            return Response(
+                {"detail": "No ratings updated. Contest may not be rated or has too few participants."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        return Response(
+            {
+                "detail": f"Successfully updated ratings for {updated_count} participants",
+                "updated_count": updated_count
+            },
+            status=status.HTTP_200_OK
+        )

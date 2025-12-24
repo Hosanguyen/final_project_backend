@@ -20,9 +20,31 @@ from .views import (
     RoleRemovePermissionsView,
     AllPermissionsForSelectionView,
     AllRolesForSelectionView,
-    ModelListView,
     UserAssignRolesView,
     UserRemoveRolesView,
+    # Rating views
+    GlobalRankingView,
+    UserRatingDetailView,
+    UserRatingHistoryView,
+    UpdateContestRatingsView,
+)
+
+# Public Profile Views
+from .public_profile_views import (
+    PublicUserProfileView,
+    PublicUserProblemsView,
+    PublicUserContestsView,
+)
+
+# User Reports Views
+from .user_reports_views import (
+    UserReportsStatsView,
+    UserReportsGrowthChartView,
+    UserReportsLevelDistributionView,
+    UserReportsCourseEnrollmentsView,
+    UserReportsContestStatsView,
+    UserReportsTopUsersView,
+    UserReportsAllUsersView,
 )
 
 
@@ -65,5 +87,47 @@ urlpatterns = [
     path('selections/permissions/', AllPermissionsForSelectionView.as_view(), name='selections-permissions'),
     path('selections/roles/', AllRolesForSelectionView.as_view(), name='selections-roles'),
 
-    path('model/list/', ModelListView.as_view(), name="Model List")
+    # ============= GLOBAL RANKING ENDPOINTS =============
+    # Global leaderboard
+    path('ranking/global/', GlobalRankingView.as_view(), name='global-ranking'),
+    
+    # User rating info
+    path('rating/me/', UserRatingDetailView.as_view(), name='my-rating'),
+    path('rating/<int:user_id>/', UserRatingDetailView.as_view(), name='user-rating'),
+    
+    # User rating history
+    path('rating/history/me/', UserRatingHistoryView.as_view(), name='my-rating-history'),
+    path('rating/history/<int:user_id>/', UserRatingHistoryView.as_view(), name='user-rating-history'),
+    
+    # Admin: update contest ratings
+    path('rating/contest/<int:contest_id>/update/', UpdateContestRatingsView.as_view(), name='update-contest-ratings'),
+
+    # ============= USER REPORTS ENDPOINTS (ADMIN) =============
+    # Statistics overview
+    path('reports/stats/', UserReportsStatsView.as_view(), name='user-reports-stats'),
+    
+    # Growth chart data
+    path('reports/growth-chart/', UserReportsGrowthChartView.as_view(), name='user-reports-growth-chart'),
+    
+    # Level distribution
+    path('reports/level-distribution/', UserReportsLevelDistributionView.as_view(), name='user-reports-level-distribution'),
+    
+    # Course enrollments
+    path('reports/course-enrollments/', UserReportsCourseEnrollmentsView.as_view(), name='user-reports-course-enrollments'),
+    
+    # Contest statistics
+    path('reports/contest-stats/', UserReportsContestStatsView.as_view(), name='user-reports-contest-stats'),
+    
+    # Top users
+    path('reports/top-users/', UserReportsTopUsersView.as_view(), name='user-reports-top-users'),
+    
+    # All users list with pagination
+    path('reports/all-users/', UserReportsAllUsersView.as_view(), name='user-reports-all-users'),
+
+    # ============= PUBLIC USER PROFILE ENDPOINTS =============
+    # Public profile (anyone can view)
+    path('<int:user_id>/profile/', PublicUserProfileView.as_view(), name='public-user-profile'),
+    path('<int:user_id>/problems/', PublicUserProblemsView.as_view(), name='public-user-problems'),
+    path('<int:user_id>/contests/', PublicUserContestsView.as_view(), name='public-user-contests'),
+
 ]

@@ -3,6 +3,11 @@ from django.db import models
 # Create your models here.
 
 class Contest(models.Model):
+    CONTEST_MODE_CHOICES = [
+        ("ICPC", "ICPC Mode"),
+        ("OI", "OI Mode"),
+    ]
+    
     id = models.BigAutoField(primary_key=True)
     slug = models.CharField(max_length=100, unique=True)
     title = models.CharField(max_length=255)
@@ -10,6 +15,8 @@ class Contest(models.Model):
     start_at = models.DateTimeField()
     end_at = models.DateTimeField()
     visibility = models.CharField(max_length=50, choices=[("public", "Public"), ("private", "Private")], default="private")
+    contest_mode = models.CharField(max_length=20, choices=CONTEST_MODE_CHOICES, default="ICPC", help_text="Contest scoring mode: ICPC (only AC/WA) or OI (test cases passed)")
+    is_show_result = models.BooleanField(default=True, help_text="Whether to show detailed test results and error messages to participants")
     penalty_time = models.IntegerField(default=20, help_text="Penalty time in minutes for each wrong submission")
     penalty_mode = models.CharField(max_length=50, choices=[("none", "No Penalty"), ("standard", "Standard Penalty")], default="standard")
     freeze_rankings_at = models.DateTimeField(null=True, blank=True, help_text="Time when the rankings will be frozen")
@@ -38,3 +45,30 @@ class ContestProblem(models.Model):
         db_table = "contest_problems"
         unique_together = ("contest", "problem")
         ordering = ["sequence"]
+
+
+class ContestParticipant(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name="contest_participations")
+    contest = models.ForeignKey(Contest, on_delete=models.CASCADE, related_name="participants")
+    registered_at = models.DateTimeField(auto_now_add=True, help_text="Time when the participant registered for the contest")
+    is_active = models.BooleanField(default=True, help_text="Whether the participant is actively participating or has cancelled")
+    
+    # Ranking fields
+    solved_count = models.IntegerField(default=0, help_text="Number of problems solved (AC)")
+    total_score = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Total score (for OI mode)")
+    penalty_seconds = models.IntegerField(default=0, help_text="Penalty time in seconds (for ICPC mode)")
+    last_submission_at = models.DateTimeField(null=True, blank=True, help_text="Time of last submission")
+    ranking_updated_at = models.DateTimeField(auto_now=True, help_text="Last time ranking was updated")
+
+    class Meta:
+        db_table = "contest_participants"
+        unique_together = ("contest", "user")
+        ordering = ["-solved_count", "penalty_seconds", "last_submission_at"]
+        indexes = [
+            models.Index(fields=["contest", "-solved_count", "penalty_seconds"]),
+            models.Index(fields=["contest", "is_active"]),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.contest.title} (Solved: {self.solved_count}, Score: {self.total_score})"

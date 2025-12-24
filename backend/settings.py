@@ -11,7 +11,10 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
 from pathlib import Path
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -46,7 +49,9 @@ INSTALLED_APPS = [
     'course',
     'problems',
     'contests',
+    'quizzes',
     'common',
+    'django_q',
 ]
 
 MIDDLEWARE = [
@@ -84,14 +89,22 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
+MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', '12345')
+MYSQL_ROOT_PASSWORD = os.getenv('MYSQL_ROOT_PASSWORD', '12345')
+MAIN_DB_NAME = os.getenv('MAIN_DB_NAME', 'finalproject')
+DJANGO_DB_HOST = os.getenv('DJANGO_DB_HOST', 'localhost')
+DJANGO_DB_PORT = os.getenv('DJANGO_DB_PORT', '3306')
+DOMJUDGE_DB_HOST = os.getenv('DOMJUDGE_DB_HOST', 'localhost')
+DOMJUDGE_DB_PORT = os.getenv('DOMJUDGE_DB_PORT', '13306')
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'finalproject',       
+        'NAME': MAIN_DB_NAME,       
         'USER': 'root',        
-        'PASSWORD': '12345', 
-        'HOST': 'localhost',   
-        'PORT': '3306',       
+        'PASSWORD': MYSQL_ROOT_PASSWORD, 
+        'HOST': DJANGO_DB_HOST,   
+        'PORT': DJANGO_DB_PORT,       
         'OPTIONS': {
             'charset': 'utf8mb4',
         },
@@ -100,9 +113,9 @@ DATABASES = {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'domjudge',
         'USER': 'domjudge',
-        'PASSWORD': 'MYSQL_PASSWORD',
-        'HOST': 'localhost',
-        'PORT': '13306',
+        'PASSWORD': MYSQL_PASSWORD,
+        'HOST': DOMJUDGE_DB_HOST,
+        'PORT': DOMJUDGE_DB_PORT,
     },
 }
 
@@ -190,10 +203,6 @@ CORS_ALLOW_METHODS = [
     "POST",
     "PUT",
 ]
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
@@ -207,3 +216,27 @@ MEDIA_ROOT = BASE_DIR / "media"
 DOMJUDGE_API_URL = os.getenv('DOMJUDGE_API_URL', 'http://localhost:8080/api/v4')
 DOMJUDGE_USERNAME = os.getenv('DOMJUDGE_USERNAME', 'admin')
 DOMJUDGE_PASSWORD = os.getenv('DOMJUDGE_PASSWORD', '12345')
+
+# VNPay Configuration
+VNPAY_TMN_CODE = os.getenv('VNPAY_TMN_CODE', '')  # Mã website tại VNPay
+VNPAY_HASH_SECRET = os.getenv('VNPAY_HASH_SECRET', '')  # Secret key
+VNPAY_URL = os.getenv('VNPAY_URL', 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html')  # URL thanh toán VNPay
+VNPAY_RETURN_URL = os.getenv('VNPAY_RETURN_URL', 'https://josephine-unsurmising-importantly.ngrok-free.dev/api/payment/vnpay/return/')  # URL callback từ VNPay
+VNPAY_API_URL = os.getenv('VNPAY_API_URL', 'https://sandbox.vnpayment.vn/merchant_webapi/api/transaction')  # URL API VNPay
+
+# ==========================================
+# DJANGO-Q2 CONFIGURATION
+# ==========================================
+Q_CLUSTER = {
+    'name': 'recommendation_cluster',
+    'workers': 2,
+    'recycle': 500,
+    'timeout': 3600,  # 1 hour timeout for training
+    'retry': 3660,  # retry must be > timeout (3600 + 60 seconds)
+    'compress': True,
+    'save_limit': 250,
+    'queue_limit': 50,
+    'label': 'Recommendation System',
+    'orm': 'default',  # Use Django ORM instead of Redis
+    'catch_up': False,  # Don't catch up on missed schedules
+}

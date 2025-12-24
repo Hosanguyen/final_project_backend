@@ -1,17 +1,22 @@
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.utils import timezone
 from datetime import timedelta
+from django.db.models import Q, Count, Sum, Avg
+from django.core.paginator import Paginator, EmptyPage
 
-from .models import Contest, ContestProblem
+from .models import Contest, ContestProblem, ContestParticipant
 from .serializers import (
     ContestCreateSerializer,
     ContestSerializer,
-    ContestListSerializer
+    ContestListSerializer,
+    LeaderboardEntrySerializer
 )
 from .domjudge_service import DOMjudgeContestService
+from .ranking_service import ContestRankingService
+from problems.models import Submissions
 from common.authentication import CustomJWTAuthentication
 
 
@@ -90,6 +95,12 @@ class ContestListView(APIView):
     """List all contests"""
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view contests list"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
     
     def get(self, request):
         contests = Contest.objects.all()
@@ -121,10 +132,24 @@ class ContestDetailView(APIView):
     """Get, update, or delete a specific contest"""
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view contest details"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
     
     def get(self, request, contest_id):
         try:
             contest = Contest.objects.get(id=contest_id)
+            
+            # Chặn truy cập contest practice từ link trực tiếp
+            if contest.slug == 'practice' and not request.user.has_role('admin'):
+                return Response({
+                    'error': 'Practice contest cannot be accessed directly. Please use /practice page.',
+                    'redirect_to': '/practice'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
             serializer = ContestSerializer(contest)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Contest.DoesNotExist:
@@ -135,6 +160,9 @@ class ContestDetailView(APIView):
     def put(self, request, contest_id):
         try:
             contest = Contest.objects.get(id=contest_id)
+            contest_mode_changed = False
+            if 'contest_mode' in request.data and request.data['contest_mode'] != contest.contest_mode:
+                contest_mode_changed = True
             serializer = ContestCreateSerializer(contest, data=request.data, partial=True, context={'request': request})
             
             if not serializer.is_valid():
@@ -144,6 +172,10 @@ class ContestDetailView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             contest = serializer.save(updated_by=request.user)
+            if contest_mode_changed:
+                # Update lazy_eval_results in DOMjudge if contest_mode changed
+                domjudge_service = DOMjudgeContestService()
+                domjudge_service.update_lazy_eval_results_for_contest(contest)
             response_serializer = ContestSerializer(contest)
             
             return Response({
@@ -234,10 +266,17 @@ class ContestProblemView(APIView):
             # Sync with DOMjudge
             try:
                 domjudge_service = DOMjudgeContestService()
+                # DOMjudge: lazy_eval_results special handling
+                # If contest is OI mode, force value 2
+                if contest.contest_mode == 'OI':
+                    lazy_eval_flag = 2
+                else:
+                    lazy_eval_flag = 1 if serializer.validated_data.get('lazy_eval_results', False) else 0
+
                 domjudge_problem_data = {
                     'label': serializer.validated_data.get('label', ''),
                     'points': serializer.validated_data.get('points', 1),
-                    'lazy_eval_results': 1 if serializer.validated_data.get('lazy_eval_results', False) else 0
+                    'lazy_eval_results': lazy_eval_flag
                 }
                 
                 # Add optional fields
@@ -338,6 +377,12 @@ class ContestDetailUserView(APIView):
     """Get, update, or delete a specific contest"""
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view practice contest"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
     
     def get(self, request):
         try:
@@ -397,3 +442,1201 @@ class ContestDetailUserView(APIView):
             return Response({
                 'error': 'Contest not found'
             }, status=status.HTTP_404_NOT_FOUND)
+
+
+class UserContestsView(APIView):
+    """Get all contests excluding practice contest for user header"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view contests list"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
+    
+    def get(self, request):
+        try:
+            # Get all contests excluding practice
+            contests = Contest.objects.exclude(slug='practice').filter(visibility='public')
+            
+            now = timezone.now()
+            
+            # Categorize contests
+            upcoming = []
+            running = []
+            finished = []
+            
+            for contest in contests:
+                contest_data = {
+                    'id': contest.id,
+                    'slug': contest.slug,
+                    'title': contest.title,
+                    'start_at': contest.start_at,
+                    'end_at': contest.end_at,
+                }
+                
+                if contest.start_at > now:
+                    upcoming.append(contest_data)
+                elif contest.start_at <= now and contest.end_at >= now:
+                    running.append(contest_data)
+                else:
+                    finished.append(contest_data)
+            
+            # Sort each category
+            upcoming.sort(key=lambda x: x['start_at'])
+            running.sort(key=lambda x: x['start_at'])
+            finished.sort(key=lambda x: x['end_at'], reverse=True)
+            
+            # Limit finished contests to most recent 5
+            finished = finished[:5]
+            
+            return Response({
+                'upcoming': upcoming,
+                'running': running,
+                'finished': finished
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({
+                'error': 'Failed to fetch contests',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class UserContestDetailView(APIView):
+    """Get contest details for user with problems sorted by label"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view contest details"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
+    
+    def get(self, request, contest_id):
+        try:
+            contest = Contest.objects.get(id=contest_id, visibility='public')
+            user = request.user
+            
+            # Calculate contest status
+            now = timezone.now()
+            if now < contest.start_at:
+                contest_status = 'upcoming'
+            elif now > contest.end_at:
+                contest_status = 'finished'
+            else:
+                contest_status = 'running'
+            
+            # Check if user is registered for the contest (only for authenticated users)
+            is_registered = False
+            registered_at = None
+            if user.is_authenticated:
+                try:
+                    participant = ContestParticipant.objects.get(
+                        contest=contest,
+                        user=user,
+                        is_active=True
+                    )
+                    is_registered = True
+                    registered_at = participant.registered_at
+                except ContestParticipant.DoesNotExist:
+                    pass
+            
+            # Show problems logic:
+            # - If contest finished: everyone can view (registered or not)
+            # - If contest running: only registered users can view
+            # - If contest upcoming: no one can view
+            problems_data = []
+            can_view_problems = False
+            
+            if contest_status == 'finished' or (is_registered and contest_status == 'running'):
+                can_view_problems = True
+                # Get contest problems sorted by label
+                contest_problems = ContestProblem.objects.filter(
+                    contest=contest
+                ).select_related('problem').order_by('label')
+                
+                # Serialize problems with user status
+                from .serializers import ContestProblemSerializer
+                problems_serializer = ContestProblemSerializer(
+                    contest_problems,
+                    many=True,
+                    context={'request': request}
+                )
+                problems_data = problems_serializer.data
+            
+            return Response({
+                'id': contest.id,
+                'slug': contest.slug,
+                'title': contest.title,
+                'description': contest.description,
+                'start_at': contest.start_at,
+                'end_at': contest.end_at,
+                'penalty_time': contest.penalty_time,
+                'penalty_mode': contest.penalty_mode,
+                'contest_mode': contest.contest_mode,
+                'status': contest_status,
+                'problem_count': ContestProblem.objects.filter(contest=contest).count(),
+                'is_registered': is_registered,
+                'registered_at': registered_at,
+                'can_view_problems': can_view_problems,
+                'problems': problems_data
+            }, status=status.HTTP_200_OK)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Contest not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Failed to fetch ContestProblem details',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestParticipantsView(APIView):
+    """Get list of participants for a contest"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, contest_id):
+        """Get all participants for a contest"""
+        try:
+            contest = Contest.objects.get(id=contest_id)
+            
+            # Get all participants (active and inactive)
+            participants = ContestParticipant.objects.filter(
+                contest=contest
+            ).select_related('user').order_by('-registered_at')
+            
+            # Serialize participants
+            from .serializers import ContestParticipantSerializer
+            serializer = ContestParticipantSerializer(participants, many=True)
+            
+            # Count statistics
+            total_count = participants.count()
+            active_count = participants.filter(is_active=True).count()
+            inactive_count = participants.filter(is_active=False).count()
+            
+            return Response({
+                'participants': serializer.data,
+                'statistics': {
+                    'total': total_count,
+                    'active': active_count,
+                    'inactive': inactive_count
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Cuộc thi không tồn tại'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Không thể tải danh sách người tham gia',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestParticipantToggleView(APIView):
+    """Toggle participant active status"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def patch(self, request, contest_id, participant_id):
+        """Deactivate active participant (Admin only can deactivate, not reactivate)"""
+        try:
+            contest = Contest.objects.get(id=contest_id)
+            participant = ContestParticipant.objects.get(
+                id=participant_id,
+                contest=contest
+            )
+            
+            # Only allow deactivating active participants
+            if not participant.is_active:
+                return Response({
+                    'error': 'Không thể kích hoạt lại người tham gia đã hủy đăng ký'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Deactivate participant
+            participant.is_active = False
+            participant.save()
+            
+            # Serialize updated participant
+            from .serializers import ContestParticipantSerializer
+            serializer = ContestParticipantSerializer(participant)
+            
+            return Response({
+                'message': 'Hủy kích hoạt người tham gia thành công',
+                'participant': serializer.data
+            }, status=status.HTTP_200_OK)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Cuộc thi không tồn tại'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except ContestParticipant.DoesNotExist:
+            return Response({
+                'error': 'Không tìm thấy người tham gia'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Không thể hủy kích hoạt người tham gia',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestUserCandidatesView(APIView):
+    """List user candidates for adding to contest (searchable)"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, contest_id):
+        from users.models import User
+        try:
+            contest = Contest.objects.get(id=contest_id)
+        except Contest.DoesNotExist:
+            return Response({'error': 'Cuộc thi không tồn tại'}, status=status.HTTP_404_NOT_FOUND)
+
+        q = request.query_params.get('q', '').strip()
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 20))
+        exclude_participating = request.query_params.get('exclude_participating', 'true').lower() != 'false'
+
+        # Validate pagination params
+        if page < 1:
+            page = 1
+        if page_size < 1:
+            page_size = 20
+        if page_size > 100:
+            page_size = 100
+
+        queryset = User.objects.all()
+
+        if q:
+            queryset = queryset.filter(
+                Q(username__icontains=q) |
+                Q(email__icontains=q) |
+                Q(full_name__icontains=q)
+            )
+
+        if exclude_participating:
+            # Exclude only users currently active in this contest; allow previously inactive participants to appear
+            participant_user_ids = ContestParticipant.objects.filter(
+                contest=contest,
+                is_active=True
+            ).values_list('user_id', flat=True)
+            queryset = queryset.exclude(id__in=participant_user_ids)
+
+        queryset = queryset.order_by('username')
+
+        paginator = Paginator(queryset, page_size)
+        try:
+            page_obj = paginator.page(page)
+        except EmptyPage:
+            page = paginator.num_pages if paginator.num_pages > 0 else 1
+            page_obj = paginator.page(page)
+
+        def avatar(u):
+            try:
+                return u.avatar_url.url if u.avatar_url and hasattr(u.avatar_url, 'url') else None
+            except Exception:
+                return None
+
+        data = [
+            {
+                'id': u.id,
+                'username': u.username,
+                'full_name': getattr(u, 'full_name', '') or u.username,
+                'email': u.email,
+                'avatar_url': avatar(u)
+            }
+            for u in page_obj.object_list
+        ]
+
+        return Response({
+            'results': data,
+            'pagination': {
+                'current_page': page,
+                'page_size': page_size,
+                'total_items': paginator.count,
+                'total_pages': paginator.num_pages,
+                'has_next': page_obj.has_next(),
+                'has_previous': page_obj.has_previous()
+            }
+        }, status=status.HTTP_200_OK)
+
+
+class ContestParticipantsBulkAddView(APIView):
+    """Bulk add users as participants to a contest"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, contest_id):
+        from users.models import User
+        try:
+            contest = Contest.objects.get(id=contest_id)
+        except Contest.DoesNotExist:
+            return Response({'error': 'Cuộc thi không tồn tại'}, status=status.HTTP_404_NOT_FOUND)
+
+        user_ids = request.data.get('user_ids', [])
+        if not isinstance(user_ids, list) or not user_ids:
+            return Response({'error': 'Danh sách user_ids không hợp lệ'}, status=status.HTTP_400_BAD_REQUEST)
+
+        users = User.objects.filter(id__in=user_ids)
+        found_ids = set(users.values_list('id', flat=True))
+
+        added = []
+        existed = []
+        for uid in found_ids:
+            participant, created = ContestParticipant.objects.get_or_create(
+                contest=contest,
+                user_id=uid,
+                defaults={'is_active': True}
+            )
+            if not created:
+                if not participant.is_active:
+                    participant.is_active = True
+                    participant.save(update_fields=['is_active'])
+                existed.append(uid)
+            else:
+                added.append(uid)
+
+        missing = [uid for uid in user_ids if uid not in found_ids]
+
+        return Response({
+            'message': 'Đã xử lý thêm người tham gia',
+            'added_count': len(added),
+            'existed_count': len(existed),
+            'missing_count': len(missing),
+            'added_user_ids': added,
+            'existed_user_ids': existed,
+            'missing_user_ids': missing
+        }, status=status.HTTP_200_OK)
+
+
+class ContestDetailStatisticsView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, contest_id):
+        try:
+            # Get the contest
+            contest = Contest.objects.filter(id=contest_id).first()
+            if not contest:
+                return Response({
+                    'error': 'Contest không tồn tại'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Get contest problems
+            contest_problems = ContestProblem.objects.filter(contest=contest).select_related('problem')
+            total_problems = contest_problems.count()
+            
+            # Get participants stats
+            participants = ContestParticipant.objects.filter(contest=contest)
+            total_participants = participants.count()
+            active_participants = participants.filter(is_active=True).count()
+            
+            # Get submissions for this contest
+            submissions = Submissions.objects.filter(
+                contest=contest
+            ).select_related('user', 'problem')
+            
+            total_submissions = submissions.count()
+            
+            # Submission by status
+            submission_stats = submissions.values('status').annotate(
+                count=Count('id')
+            ).order_by('-count')
+            
+            # Calculate acceptance rate
+            accepted_submissions = submissions.filter(status='AC').count()
+            acceptance_rate = round((accepted_submissions / total_submissions * 100) if total_submissions > 0 else 0, 2)
+            
+            # Submissions by problem
+            problem_stats = []
+            for cp in contest_problems:
+                problem_submissions = submissions.filter(problem=cp.problem)
+                problem_accepted = problem_submissions.filter(status='AC').count()
+                problem_total = problem_submissions.count()
+                
+                problem_stats.append({
+                    'problem_id': cp.problem.id,
+                    'problem_title': cp.problem.title,
+                    'alias': cp.alias,
+                    'total_submissions': problem_total,
+                    'accepted_submissions': problem_accepted,
+                    'acceptance_rate': round((problem_accepted / problem_total * 100) if problem_total > 0 else 0, 2),
+                    'point': cp.point
+                })
+            
+            # Top participants in this contest
+            top_participants_data = []
+            top_participants = participants.order_by('-solved_count', 'penalty_seconds')[:10]
+            
+            for participant in top_participants:
+                user_submissions = submissions.filter(user=participant.user)
+                user_ac = user_submissions.filter(status='AC').count()
+                
+                top_participants_data.append({
+                    'user_id': participant.user.id,
+                    'username': participant.user.username,
+                    'full_name': participant.user.full_name or participant.user.username,
+                    'solved_count': participant.solved_count,
+                    'total_score': float(participant.total_score),
+                    'total_submissions': user_submissions.count(),
+                    'accepted_submissions': user_ac,
+                    'penalty_seconds': participant.penalty_seconds
+                })
+            
+            # Submissions over time (by day during contest)
+            submissions_by_day = submissions.extra(
+                select={'day': "DATE_FORMAT(submitted_at, '%%Y-%%m-%%d')"}
+            ).values('day').annotate(
+                count=Count('id')
+            ).order_by('day')
+            
+            # Participants registration over time
+            participants_by_day = participants.extra(
+                select={'day': "DATE_FORMAT(registered_at, '%%Y-%%m-%%d')"}
+            ).values('day').annotate(
+                count=Count('id')
+            ).order_by('day')
+            
+            # Error distribution (non-AC submissions)
+            error_stats = submissions.exclude(status='AC').values('status').annotate(
+                count=Count('id')
+            ).order_by('-count')
+            
+            # Test case statistics from DOMjudge
+            test_case_stats = self._get_test_case_statistics(contest, submissions)
+            
+            # Recent submissions
+            recent_submissions = submissions.order_by('-submitted_at')[:20]
+            recent_submissions_data = []
+            
+            # Create a map of problem_id to contest_problem for alias lookup
+            problem_alias_map = {cp.problem.id: cp.alias for cp in contest_problems}
+            
+            for sub in recent_submissions:
+                recent_submissions_data.append({
+                    'id': sub.id,
+                    'user': sub.user.username,
+                    'problem': sub.problem.title,
+                    'alias': problem_alias_map.get(sub.problem.id, ''),
+                    'status': sub.status,
+                    'language': sub.language.name if sub.language else 'Unknown',
+                    'created_at': sub.submitted_at.isoformat()
+                })
+            
+            return Response({
+                'contest': {
+                    'id': contest.id,
+                    'slug': contest.slug,
+                    'title': contest.title,
+                    'description': contest.description,
+                    'start_at': contest.start_at.isoformat(),
+                    'end_at': contest.end_at.isoformat(),
+                    'visibility': contest.visibility,
+                    'contest_mode': contest.contest_mode,
+                    'is_show_result': contest.is_show_result
+                },
+                'statistics': {
+                    'problems': {
+                        'total': total_problems,
+                        'by_problem': problem_stats
+                    },
+                    'participants': {
+                        'total': total_participants,
+                        'active': active_participants,
+                        'top_participants': top_participants_data
+                    },
+                    'submissions': {
+                        'total': total_submissions,
+                        'accepted': accepted_submissions,
+                        'acceptance_rate': acceptance_rate,
+                        'by_status': list(submission_stats),
+                        'recent': recent_submissions_data
+                    },
+                    'errors': {
+                        'distribution': list(error_stats)
+                    },
+                    'test_cases': test_case_stats
+                },
+                'charts': {
+                    'submissions_over_time': list(submissions_by_day),
+                    'participants_registration': list(participants_by_day),
+                    'problem_statistics': problem_stats,
+                    'error_distribution': list(error_stats)
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import traceback
+            return Response({
+                'error': 'Không thể lấy thống kê chi tiết contest',
+                'details': str(e),
+                'traceback': traceback.format_exc()
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _get_test_case_statistics(self, contest, submissions):
+        """
+        Get test case statistics from DOMjudge database
+        Returns statistics about passed/failed test cases
+        """
+        from common.connection import execute_raw_query
+        
+        try:
+            # Get all submission IDs for this contest
+            submission_ids = [s.domjudge_submission_id for s in submissions if s.domjudge_submission_id]
+            
+            if not submission_ids:
+                return {
+                    'total_test_cases_run': 0,
+                    'passed_test_cases': 0,
+                    'failed_test_cases': 0,
+                    'by_verdict': []
+                }
+            
+            # Query DOMjudge to get test case results
+            placeholders = ','.join(['%s'] * len(submission_ids))
+            query = f"""
+                SELECT 
+                    jr.runresult as verdict,
+                    COUNT(*) as count
+                FROM judging_run jr
+                JOIN judging j ON jr.judgingid = j.judgingid
+                WHERE j.submitid IN ({placeholders})
+                    AND j.valid = 1
+                    AND jr.endtime IS NOT NULL
+                GROUP BY jr.runresult
+                ORDER BY count DESC
+            """
+            
+            results = execute_raw_query('domjudge', query, submission_ids, fetch=True)
+            
+            total_test_cases = 0
+            passed_test_cases = 0
+            by_verdict = []
+            
+            for row in results:
+                verdict = row['verdict']
+                count = row['count']
+                total_test_cases += count
+                
+                if verdict == 'correct':
+                    passed_test_cases += count
+                
+                by_verdict.append({
+                    'verdict': verdict,
+                    'count': count
+                })
+            
+            return {
+                'total_test_cases_run': total_test_cases,
+                'passed_test_cases': passed_test_cases,
+                'failed_test_cases': total_test_cases - passed_test_cases,
+                'by_verdict': by_verdict
+            }
+            
+        except Exception as e:
+            print(f"Error getting test case statistics: {str(e)}")
+            return {
+                'total_test_cases_run': 0,
+                'passed_test_cases': 0,
+                'failed_test_cases': 0,
+                'by_verdict': []
+            }
+
+
+class ContestRegistrationView(APIView):
+    """Register or unregister from a contest"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, contest_id):
+        """Register for a contest"""
+        try:
+            contest = Contest.objects.get(id=contest_id, visibility='public')
+            user = request.user
+            
+            # Check if contest has ended
+            now = timezone.now()
+            if now > contest.end_at:
+                return Response({
+                    'error': 'Không thể đăng ký cuộc thi đã kết thúc'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Check if user is already registered
+            participant, created = ContestParticipant.objects.get_or_create(
+                contest=contest,
+                user=user,
+                defaults={'is_active': True}
+            )
+            
+            if not created:
+                # If already exists, reactivate if previously cancelled
+                if not participant.is_active:
+                    participant.is_active = True
+                    participant.save()
+                    return Response({
+                        'message': 'Đăng ký lại cuộc thi thành công',
+                        'registered_at': participant.registered_at
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response({
+                        'error': 'Đã đăng ký cuộc thi này',
+                        'registered_at': participant.registered_at
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            return Response({
+                'message': 'Đăng ký cuộc thi thành công',
+                'registered_at': participant.registered_at
+            }, status=status.HTTP_201_CREATED)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Cuộc thi không tồn tại'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Không thể đăng ký cuộc thi',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def delete(self, request, contest_id):
+        """Unregister from a contest"""
+        try:
+            contest = Contest.objects.get(id=contest_id, visibility='public')
+            user = request.user
+            
+            # Check if contest has started or registration period ended
+            now = timezone.now()
+            if now >= contest.start_at:
+                return Response({
+                    'error': 'Không thể hủy đăng ký sau khi cuộc thi đã bắt đầu'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Find participant record
+            try:
+                participant = ContestParticipant.objects.get(
+                    contest=contest,
+                    user=user
+                )
+                
+                # Deactivate instead of delete to keep history
+                participant.is_active = False
+                participant.save()
+                
+                return Response({
+                    'message': 'Hủy đăng ký cuộc thi thành công'
+                }, status=status.HTTP_200_OK)
+                
+            except ContestParticipant.DoesNotExist:
+                return Response({
+                    'error': 'Chưa đăng ký cuộc thi này'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Cuộc thi không tồn tại'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Không thể hủy đăng ký cuộc thi',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestRegistrationStatusView(APIView):
+    """Check if user is registered for a contest"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, contest_id):
+        """Get registration status for current user"""
+        try:
+            contest = Contest.objects.get(id=contest_id, visibility='public')
+            user = request.user
+            
+            try:
+                participant = ContestParticipant.objects.get(
+                    contest=contest,
+                    user=user
+                )
+                
+                return Response({
+                    'is_registered': participant.is_active,
+                    'registered_at': participant.registered_at if participant.is_active else None
+                }, status=status.HTTP_200_OK)
+                
+            except ContestParticipant.DoesNotExist:
+                return Response({
+                    'is_registered': False,
+                    'registered_at': None
+                }, status=status.HTTP_200_OK)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Cuộc thi không tồn tại'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Không thể kiểm tra trạng thái đăng ký',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestProblemDetailView(APIView):
+    """Get ContestProblem details by id"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, contest_problem_id):
+        try:
+            contest_problem = ContestProblem.objects.select_related(
+                'contest', 'problem'
+            ).get(id=contest_problem_id)
+            
+            from .serializers import ContestProblemDetailSerializer
+            serializer = ContestProblemDetailSerializer(contest_problem)
+            
+            return Response(serializer.data, status=status.HTTP_200_OK)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Không tìm thấy ContestProblem'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'error': 'Không thể tải chi tiết ContestProblem',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestLeaderboardView(APIView):
+    """Get leaderboard for a contest"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Allow any user to view contest leaderboard"""
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
+    
+    def get(self, request, contest_id):
+        """Get contest leaderboard with rankings"""
+        try:
+            contest = Contest.objects.get(id=contest_id)
+            
+            # Get contest problems for column headers
+            contest_problems = ContestProblem.objects.filter(
+                contest=contest
+            ).select_related('problem').order_by('label')
+            
+            problem_list = [{
+                'id': cp.problem.id,
+                'label': cp.label,
+                'alias': cp.alias,
+                'point': cp.point,
+                'title': cp.problem.title,
+                'color': cp.color or '',
+                'rgb': cp.rgb or ''
+            } for cp in contest_problems]
+            
+            # Get rankings
+            participants = ContestRankingService.get_contest_leaderboard(contest_id)
+            
+            # Build leaderboard entries
+            leaderboard_data = []
+            current_rank = 1
+            
+            for idx, participant in enumerate(participants, start=1):
+                # Get problem details for this user (for ICPC mode)
+                problem_details = {}
+                if contest.contest_mode == 'ICPC' or contest.slug == 'practice':
+                    problem_details = ContestRankingService.get_user_problem_details(
+                        contest_id,
+                        participant.user.id
+                    )
+                
+                # Get full name
+                full_name = participant.user.full_name if participant.user.full_name else participant.user.username
+                
+                # Get avatar URL properly
+                avatar_url = None
+                if participant.user.avatar_url:
+                    avatar_url = participant.user.avatar_url.url if hasattr(participant.user.avatar_url, 'url') else str(participant.user.avatar_url)
+                
+                # Attempted problems (distinct problems with any submission)
+                attempted_count = None
+                try:
+                    # Only compute for practice to avoid heavy queries elsewhere
+                    if contest.slug == 'practice':
+                        # Count distinct problems the user has ever submitted within the window
+                        attempted_count = Submissions.objects.filter(
+                            contest=contest,
+                            user=participant.user,
+                            submitted_at__gte=contest.start_at,
+                            submitted_at__lte=contest.end_at
+                        ).values('problem').distinct().count()
+                except Exception:
+                    attempted_count = None
+
+                entry = {
+                    'rank': current_rank,
+                    'user_id': participant.user.id,
+                    'username': participant.user.username,
+                    'full_name': full_name,
+                    'avatar_url': avatar_url,
+                    'solved_count': participant.solved_count,
+                    'total_score': float(participant.total_score),
+                    'penalty_seconds': participant.penalty_seconds,
+                    'penalty_minutes': participant.penalty_seconds // 60,
+                    'last_submission_at': participant.last_submission_at,
+                    'problems': problem_details,
+                    'attempted_count': attempted_count
+                }
+                
+                leaderboard_data.append(entry)
+                current_rank += 1
+            
+            return Response({
+                'contest_id': contest.id,
+                'contest_slug': contest.slug,
+                'contest_title': contest.title,
+                'contest_mode': contest.contest_mode,
+                'penalty_time': contest.penalty_time,
+                'problems': problem_list,
+                'leaderboard': leaderboard_data,
+                'total_participants': len(leaderboard_data)
+            }, status=status.HTTP_200_OK)
+            
+        except Contest.DoesNotExist:
+            return Response({
+                'error': 'Contest not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'error': 'Failed to fetch leaderboard',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestRecalculateRankingsView(APIView):
+    """Trigger a full rankings recalculation for a contest (admin utility)"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, contest_id):
+        try:
+            # Ensure contest exists
+            try:
+                contest = Contest.objects.get(id=contest_id)
+            except Contest.DoesNotExist:
+                return Response({'error': 'Contest not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            # Recalculate rankings for all active participants
+            updated_count = ContestRankingService.recalculate_all_rankings(contest_id)
+
+            return Response({
+                'message': 'Đã tính lại xếp hạng',
+                'updated_participants': updated_count,
+                'contest_id': contest.id,
+                'contest_slug': contest.slug
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({
+                'error': 'Không thể tính lại xếp hạng',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ContestStatisticsView(APIView):
+    """Get contest statistics for admin dashboard - separated Practice and Contest"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            from django.db.models import Count, Sum, Avg, Q
+            from django.utils import timezone
+            from datetime import timedelta, datetime
+            
+            now = timezone.now()
+            
+            # Get month parameter (format: YYYY-MM)
+            month_param = request.query_params.get('month')
+            
+            # Parse month filter
+            month_filter = {}
+            if month_param:
+                try:
+                    year, month = map(int, month_param.split('-'))
+                    # Get first and last day of the month
+                    from calendar import monthrange
+                    first_day = datetime(year, month, 1)
+                    last_day = datetime(year, month, monthrange(year, month)[1], 23, 59, 59)
+                    
+                    # Make timezone aware
+                    first_day = timezone.make_aware(first_day)
+                    last_day = timezone.make_aware(last_day)
+                    
+                    month_filter = {
+                        'created_at__gte': first_day,
+                        'created_at__lte': last_day
+                    }
+                except (ValueError, AttributeError):
+                    pass
+            
+            # Separate Practice and Contest
+            practice_contest = Contest.objects.filter(slug='practice').first()
+            contests = Contest.objects.exclude(slug='practice')
+            
+            # Apply month filter to contests if provided
+            if month_filter:
+                contests = contests.filter(**month_filter)
+            
+            # === PRACTICE STATISTICS ===
+            practice_stats = {}
+            if practice_contest:
+                practice_problems = ContestProblem.objects.filter(contest=practice_contest).count()
+                
+                # Practice submissions with month filter
+                practice_sub_filter = {'contest': practice_contest}
+                if month_filter:
+                    practice_sub_filter.update({
+                        'submitted_at__gte': month_filter['created_at__gte'],
+                        'submitted_at__lte': month_filter['created_at__lte']
+                    })
+                practice_submissions = Submissions.objects.filter(**practice_sub_filter).count()
+                
+                # Practice participants with month filter
+                practice_part_filter = {'contest': practice_contest, 'is_active': True}
+                if month_filter:
+                    practice_part_filter.update({
+                        'registered_at__gte': month_filter['created_at__gte'],
+                        'registered_at__lte': month_filter['created_at__lte']
+                    })
+                practice_participants = ContestParticipant.objects.filter(**practice_part_filter).count()
+                
+                # Practice accepted submissions
+                practice_accepted_filter = practice_sub_filter.copy()
+                practice_accepted_filter['status'] = 'correct'
+                practice_accepted = Submissions.objects.filter(**practice_accepted_filter).count()
+                
+                practice_stats = {
+                    'contest_id': practice_contest.id,
+                    'contest_slug': practice_contest.slug,
+                    'total_problems': practice_problems,
+                    'total_submissions': practice_submissions,
+                    'total_participants': practice_participants,
+                    'accepted_submissions': practice_accepted,
+                    'acceptance_rate': round((practice_accepted / practice_submissions * 100) if practice_submissions > 0 else 0, 2)
+                }
+            
+            # === CONTEST STATISTICS ===
+            # Total contests (excluding practice)
+            total_contests = contests.count()
+            
+            # Contests by status
+            upcoming_contests = contests.filter(start_at__gt=now).count()
+            ongoing_contests = contests.filter(start_at__lte=now, end_at__gte=now).count()
+            ended_contests = contests.filter(end_at__lt=now).count()
+            
+            # Contests by visibility
+            public_contests = contests.filter(visibility='public').count()
+            private_contests = contests.filter(visibility='private').count()
+            
+            # Contests by mode
+            icpc_contests = contests.filter(contest_mode='ICPC').count()
+            oi_contests = contests.filter(contest_mode='OI').count()
+            
+            # Total problems in contests
+            contest_problem_ids = contests.values_list('id', flat=True)
+            total_contest_problems = ContestProblem.objects.filter(contest_id__in=contest_problem_ids).count()
+            
+            # Average problems per contest
+            avg_problems = ContestProblem.objects.filter(
+                contest_id__in=contest_problem_ids
+            ).values('contest').annotate(
+                count=Count('id')
+            ).aggregate(avg=Avg('count'))['avg'] or 0
+            
+            # Total participants (excluding practice)
+            participant_filter = {'contest_id__in': contest_problem_ids, 'is_active': True}
+            if month_filter:
+                participant_filter.update({
+                    'registered_at__gte': month_filter['created_at__gte'],
+                    'registered_at__lte': month_filter['created_at__lte']
+                })
+            total_participants = ContestParticipant.objects.filter(**participant_filter).count()
+            
+            # Average participants per contest
+            avg_participants = ContestParticipant.objects.filter(
+                **participant_filter
+            ).values('contest').annotate(
+                count=Count('id')
+            ).aggregate(avg=Avg('count'))['avg'] or 0
+            
+            # Total submissions in contests (excluding practice)
+            submission_filter = {'contest_id__in': contest_problem_ids}
+            if month_filter:
+                submission_filter.update({
+                    'submitted_at__gte': month_filter['created_at__gte'],
+                    'submitted_at__lte': month_filter['created_at__lte']
+                })
+            total_submissions = Submissions.objects.filter(**submission_filter).count()
+            
+            # Accepted submissions
+            accepted_filter = submission_filter.copy()
+            accepted_filter['status'] = 'correct'
+            accepted_submissions = Submissions.objects.filter(**accepted_filter).count()
+            
+            # Submission statistics by status for contests
+            submission_stats = Submissions.objects.filter(**submission_filter).values('status').annotate(count=Count('id')).order_by('-count')
+            
+            # Submissions over time (last 30 days) for chart
+            thirty_days_ago = now - timedelta(days=30)
+            submissions_by_date = Submissions.objects.filter(
+                contest_id__in=contest_problem_ids,
+                submitted_at__gte=thirty_days_ago
+            ).extra(
+                select={'date': 'DATE(submitted_at)'}
+            ).values('date').annotate(
+                count=Count('id')
+            ).order_by('date')
+            
+            # Contest creation trend (last 12 months) - MySQL compatible
+            twelve_months_ago = now - timedelta(days=365)
+            contests_by_month = contests.filter(
+                created_at__gte=twelve_months_ago
+            ).extra(
+                select={'month': "DATE_FORMAT(created_at, '%%Y-%%m')"}
+            ).values('month').annotate(
+                count=Count('id')
+            ).order_by('month')
+            
+            # Participant growth trend (last 12 months) - MySQL compatible
+            participants_by_month = ContestParticipant.objects.filter(
+                contest_id__in=contest_problem_ids,
+                registered_at__gte=twelve_months_ago,
+                is_active=True
+            ).extra(
+                select={'month': "DATE_FORMAT(registered_at, '%%Y-%%m')"}
+            ).values('month').annotate(
+                count=Count('id')
+            ).order_by('month')
+            
+            # Recent contests (excluding practice)
+            recent_contests = contests.select_related('created_by').order_by('-created_at')[:10]
+            recent_contests_data = []
+            for contest in recent_contests:
+                participants_count = ContestParticipant.objects.filter(
+                    contest=contest,
+                    is_active=True
+                ).count()
+                problems_count = ContestProblem.objects.filter(contest=contest).count()
+                submissions_count = Submissions.objects.filter(contest=contest).count()
+                
+                recent_contests_data.append({
+                    'id': contest.id,
+                    'title': contest.title,
+                    'slug': contest.slug,
+                    'start_at': contest.start_at,
+                    'end_at': contest.end_at,
+                    'visibility': contest.visibility,
+                    'contest_mode': contest.contest_mode,
+                    'participants_count': participants_count,
+                    'problems_count': problems_count,
+                    'submissions_count': submissions_count,
+                    'created_by': contest.created_by.username if contest.created_by else None,
+                    'created_at': contest.created_at
+                })
+            
+            # Most participated contests (excluding practice)
+            most_participated = contests.annotate(
+                participant_count=Count('participants', filter=Q(participants__is_active=True))
+            ).order_by('-participant_count')[:10]
+            
+            most_participated_data = []
+            for contest in most_participated:
+                most_participated_data.append({
+                    'id': contest.id,
+                    'title': contest.title,
+                    'slug': contest.slug,
+                    'participants_count': contest.participant_count,
+                    'start_at': contest.start_at,
+                    'end_at': contest.end_at
+                })
+            
+            # Top performers (users with most contest participations)
+            from users.models import User
+            top_performers = User.objects.filter(
+                contest_participations__contest_id__in=contest_problem_ids,
+                contest_participations__is_active=True
+            ).annotate(
+                contests_count=Count('contest_participations'),
+                total_solved=Sum('contest_participations__solved_count')
+            ).order_by('-total_solved', '-contests_count')[:10]
+            
+            top_performers_data = []
+            for user in top_performers:
+                top_performers_data.append({
+                    'id': user.id,
+                    'username': user.username,
+                    'full_name': user.full_name,
+                    'contests_participated': user.contests_count,
+                    'total_problems_solved': user.total_solved or 0
+                })
+            
+            return Response({
+                'practice': practice_stats,
+                'contests': {
+                    'overview': {
+                        'total_contests': total_contests,
+                        'upcoming_contests': upcoming_contests,
+                        'ongoing_contests': ongoing_contests,
+                        'ended_contests': ended_contests,
+                        'public_contests': public_contests,
+                        'private_contests': private_contests,
+                        'icpc_contests': icpc_contests,
+                        'oi_contests': oi_contests
+                    },
+                    'problems': {
+                        'total_contest_problems': total_contest_problems,
+                        'avg_problems_per_contest': round(avg_problems, 2)
+                    },
+                    'participants': {
+                        'total_participants': total_participants,
+                        'avg_participants_per_contest': round(avg_participants, 2)
+                    },
+                    'submissions': {
+                        'total_submissions': total_submissions,
+                        'accepted_submissions': accepted_submissions,
+                        'acceptance_rate': round((accepted_submissions / total_submissions * 100) if total_submissions > 0 else 0, 2),
+                        'by_status': list(submission_stats)
+                    },
+                    'recent_contests': recent_contests_data,
+                    'most_participated_contests': most_participated_data,
+                    'top_performers': top_performers_data
+                },
+                'charts': {
+                    'submissions_trend': list(submissions_by_date),
+                    'contests_by_month': list(contests_by_month),
+                    'participants_growth': list(participants_by_month)
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import traceback
+            return Response({
+                'error': 'Không thể lấy thống kê contest',
+                'details': str(e),
+                'traceback': traceback.format_exc()
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
