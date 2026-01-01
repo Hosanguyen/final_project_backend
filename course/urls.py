@@ -6,7 +6,8 @@ from .views import (
     LessonResourceView, LessonResourceDetailView,
     TagView, TagDetailView,
     CreatePaymentView, VNPayReturnView, CheckPaymentStatusView,
-    OrderHistoryView, CheckEnrollmentView, EnrollmentListView
+    OrderHistoryView, CheckEnrollmentView, EnrollmentListView,
+    VideoStreamView, VideoInfoView
 )
 from .course_reports_views import (
     CourseReportsStatsView,
@@ -50,6 +51,10 @@ urlpatterns = [
     # Enrollment URLs
     path("enrollment/check/<int:course_id>/", CheckEnrollmentView.as_view(), name="check-enrollment"),
     path("enrollment/list/", EnrollmentListView.as_view(), name="enrollment-list"),
+    
+    # Video Streaming URLs
+    path("video/stream/<int:resource_id>/", VideoStreamView.as_view(), name="video-stream"),
+    path("video/info/<int:resource_id>/", VideoInfoView.as_view(), name="video-info"),
     
     # Reports URLs
     path("courses/reports/stats/", CourseReportsStatsView.as_view(), name="course-reports-stats"),

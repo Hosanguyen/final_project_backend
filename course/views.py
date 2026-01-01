@@ -6,8 +6,13 @@ from django.db.models import Q
 from django.utils import timezone
 from django.db import transaction
 from django.shortcuts import redirect
-from django.http import HttpResponse
+from django.http import HttpResponse, StreamingHttpResponse, FileResponse, Http404
+from django.views.decorators.http import require_GET
+from django.conf import settings
 import uuid
+import os
+import mimetypes
+import re
 
 from common.authentication import CustomJWTAuthentication
 from .models import Language, Course, Lesson, LessonResource, Tag, File, Order, Enrollment
@@ -841,4 +846,181 @@ class EnrollmentListView(APIView):
         enrollments = Enrollment.objects.filter(user=request.user).select_related('course')
         serializer = EnrollmentSerializer(enrollments, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class VideoStreamView(APIView):
+    """
+    Video streaming view with support for HTTP Range requests
+    Allows seeking/scrubbing in video player
+    """
+    authentication_classes = []  # Không yêu cầu authentication vì <video> tag không gửi được header
+    permission_classes = [AllowAny]  # Cho phép mọi user access (có thể thêm logic kiểm tra khác)
+
+    def get(self, request, resource_id):
+        """
+        Stream video file with Range request support
+        URL: /api/video/stream/<resource_id>/
+        """
+        try:
+            resource = LessonResource.objects.select_related('lesson__course', 'file').get(
+                id=resource_id,
+                type='video'
+            )
+        except LessonResource.DoesNotExist:
+            raise Http404("Video resource not found")
+
+        # Check if user is enrolled in the course (optional, uncomment if needed)
+        # if resource.lesson and resource.lesson.course:
+        #     is_enrolled = Enrollment.objects.filter(
+        #         user=request.user,
+        #         course=resource.lesson.course
+        #     ).exists()
+        #     if not is_enrolled:
+        #         return Response(
+        #             {"error": "You must be enrolled in this course to access this video"},
+        #             status=status.HTTP_403_FORBIDDEN
+        #         )
+
+        # Get the file
+        if not resource.file or not resource.file.storage_key:
+            raise Http404("Video file not found")
+
+        file_path = resource.file.storage_key.path
+        
+        if not os.path.exists(file_path):
+            raise Http404("Video file not found on disk")
+
+        # Get file size
+        file_size = os.path.getsize(file_path)
+        
+        # Get content type
+        content_type, _ = mimetypes.guess_type(file_path)
+        if content_type is None or not content_type.startswith('video/'):
+            content_type = 'video/mp4'  # Default to mp4
+
+        # Parse Range header
+        range_header = request.META.get('HTTP_RANGE', '').strip()
+        range_match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+
+        if range_match:
+            # Range request - return partial content
+            start = int(range_match.group(1))
+            end = range_match.group(2)
+            end = int(end) if end else file_size - 1
+            
+            # Validate range
+            if start >= file_size or end >= file_size or start > end:
+                response = HttpResponse(status=416)  # Range Not Satisfiable
+                response['Content-Range'] = f'bytes */{file_size}'
+                return response
+            
+            # Calculate content length
+            length = end - start + 1
+            
+            # Open file and seek to start position
+            def file_iterator(file_path, start, length, chunk_size=8192):
+                """Generator to read file in chunks"""
+                with open(file_path, 'rb') as f:
+                    f.seek(start)
+                    remaining = length
+                    while remaining > 0:
+                        chunk_size_to_read = min(chunk_size, remaining)
+                        data = f.read(chunk_size_to_read)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+            
+            # Create streaming response
+            response = StreamingHttpResponse(
+                file_iterator(file_path, start, length),
+                status=206,  # Partial Content
+                content_type=content_type
+            )
+            
+            # Set headers for partial content
+            response['Content-Length'] = str(length)
+            response['Content-Range'] = f'bytes {start}-{end}/{file_size}'
+            response['Accept-Ranges'] = 'bytes'
+            
+        else:
+            # No range - return full file
+            def file_iterator(file_path, chunk_size=8192):
+                """Generator to read entire file in chunks"""
+                with open(file_path, 'rb') as f:
+                    while True:
+                        data = f.read(chunk_size)
+                        if not data:
+                            break
+                        yield data
+            
+            response = StreamingHttpResponse(
+                file_iterator(file_path),
+                content_type=content_type
+            )
+            response['Content-Length'] = str(file_size)
+            response['Accept-Ranges'] = 'bytes'
+
+        # Set additional headers
+        filename = os.path.basename(file_path)
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        
+        # CORS headers for development
+        response['Access-Control-Allow-Origin'] = '*'
+        response['Access-Control-Expose-Headers'] = 'Content-Length, Content-Range, Accept-Ranges'
+        response['Cross-Origin-Resource-Policy'] = 'cross-origin'
+        
+        # Caching headers
+        response['Cache-Control'] = 'public, max-age=3600'
+        
+        return response
+
+
+class VideoInfoView(APIView):
+    """Get video information without streaming"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, resource_id):
+        """
+        Get video metadata
+        URL: /api/video/info/<resource_id>/
+        """
+        try:
+            resource = LessonResource.objects.select_related('lesson__course', 'file').get(
+                id=resource_id,
+                type='video'
+            )
+        except LessonResource.DoesNotExist:
+            return Response(
+                {"error": "Video resource not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if not resource.file or not resource.file.storage_key:
+            return Response(
+                {"error": "Video file not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        file_path = resource.file.storage_key.path
+        
+        if not os.path.exists(file_path):
+            return Response(
+                {"error": "Video file not found on disk"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Get file info
+        file_size = os.path.getsize(file_path)
+        content_type, _ = mimetypes.guess_type(file_path)
+        
+        return Response({
+            "id": resource.id,
+            "title": resource.title,
+            "filename": resource.file.filename,
+            "size": file_size,
+            "content_type": content_type,
+            "stream_url": f"/api/video/stream/{resource_id}/",
+        }, status=status.HTTP_200_OK)
 
