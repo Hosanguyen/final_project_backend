@@ -14,6 +14,8 @@ from .serializers import (
     TestCaseSerializer, TestCaseCreateSerializer
 )
 from .domjudge_service import DOMjudgeService
+from contests.domjudge_service import DOMjudgeContestService
+from contests.models import ContestProblem, Contest
 from common.authentication import CustomJWTAuthentication
 
 
@@ -133,6 +135,27 @@ class ProblemListCreateView(APIView):
                 problem.is_synced_to_domjudge = True
                 problem.last_synced_at = timezone.now()
                 problem.save()
+
+
+                contest = Contest.objects.filter(slug='practice').first()
+                max_sequence = ContestProblem.objects.filter(contest=contest).count()
+
+                domjudge_contest_service = DOMjudgeContestService()
+                if problem.is_public:
+                    contest_problem = ContestProblem.objects.create(
+                        contest=contest,
+                        problem=problem,
+                        alias=problem.slug,
+                        point=1,
+                        sequence=max_sequence,
+                        label=problem.slug,
+                        lazy_eval_results=False
+                    )
+                    domjudge_contest_service.add_problem_to_contest('practice', problem.slug, {
+                        'label': problem.slug,
+                        'lazy_eval_results': 0,
+                        'points': 1
+                    })
                 
                 sync_status = "synced"
                 sync_message = f"Synced to DOMjudge with ID: {domjudge_problem_id}"
@@ -223,6 +246,40 @@ class ProblemDetailView(APIView):
             except Exception as e:
                 sync_status = "sync_failed"
                 sync_message = str(e)
+        
+        domjudge_contest_service = DOMjudgeContestService()
+        contest = Contest.objects.filter(slug='practice').first()
+        max_sequence = ContestProblem.objects.filter(contest=contest).count()
+
+        if problem.is_public:
+            try:
+                contest_problem, created = ContestProblem.objects.get_or_create(
+                    contest=contest,
+                    problem=problem,
+                    defaults={
+                        'alias': problem.slug,
+                        'point': 1,
+                        'sequence': max_sequence,
+                        'label': problem.slug,
+                        'lazy_eval_results': False
+                    }
+                )
+                if created:
+                    domjudge_contest_service.add_problem_to_contest('practice', problem.slug, {
+                        'label': problem.slug,
+                        'lazy_eval_results': 0,
+                        'points': 1
+                    })
+            except Exception as e:
+                print(f"Warning: Failed to add/update problem in practice contest: {str(e)}")
+        elif problem.is_public == False:
+            try:
+                contest_problem = ContestProblem.objects.get(contest=contest, problem=problem)
+                if contest_problem:
+                    contest_problem.delete()
+                    domjudge_contest_service.remove_problem_from_contest('practice', problem.slug)
+            except Exception as e:
+                print(f"Warning: Failed to remove problem from practice contest: {str(e)}")
         
         detail_serializer = ProblemDetailSerializer(problem)
         
