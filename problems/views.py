@@ -862,7 +862,6 @@ class ProblemRecommendationView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        import pickle
         import os
         from django.conf import settings
         
@@ -871,29 +870,17 @@ class ProblemRecommendationView(APIView):
             
             # Lấy tham số
             n_recommendations = int(request.query_params.get('limit', 10))
-            strategy = request.query_params.get('strategy', 'similar')  # similar or challenging
-            
-            if strategy not in ['similar', 'challenging']:
-                return Response({
-                    'error': 'Invalid strategy. Use "similar" or "challenging"'
-                }, status=status.HTTP_400_BAD_REQUEST)
             
             # Load model
-            model_path = os.path.join(settings.BASE_DIR, 'media', 'models', 'recommendation_model.pkl')
+            from common.recommender import ProductionRecommender
+            recommender = ProductionRecommender(model_path='recommendation_model.pkl')
             
-            if not os.path.exists(model_path):
+            # Load model từ file
+            if not recommender.load_model():
                 return Response({
                     'error': 'Recommendation model not found. Please train the model first.',
                     'hint': 'Run: python manage.py train_recommendation'
                 }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-            
-            with open(model_path, 'rb') as f:
-                model_data = pickle.load(f)
-            
-            # Khôi phục recommender
-            from common.recommender import ProductionRecommender
-            recommender = ProductionRecommender()
-            recommender.__dict__.update(model_data)
             
             # Lấy danh sách bài đã giải của user (AC only)
             solved_submissions = Submissions.objects.filter(
@@ -917,8 +904,7 @@ class ProblemRecommendationView(APIView):
                 user_id=user.id,
                 solved_ids=solved_ids,
                 valid_problem_ids_set=valid_problem_ids,
-                n_recommendations=n_recommendations,
-                strategy=strategy
+                n_recommendations=n_recommendations
             )
             
             # Nếu không có gợi ý (cold start hoặc đã giải hết)
@@ -946,7 +932,6 @@ class ProblemRecommendationView(APIView):
                 'username': user.username,
                 'user_rating': user.current_rating,
                 'solved_count': len(solved_ids),
-                'strategy': strategy,
                 'recommendations': recommendations
             })
             

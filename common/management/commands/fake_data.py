@@ -42,13 +42,12 @@ class DataFaker:
         """Tạo hoặc lấy Languages và Tags"""
         print("   -> Setting up Languages and Tags...")
         
-        # Ensure languages exist
+        # Ensure languages exist - Chỉ lấy các language có allow_submit=1 trong DOMjudge
         language_data = [
-            {'code': 'python', 'name': 'Python 3', 'externalid': 'python3', 'extension': '.py'},
-            {'code': 'java', 'name': 'Java', 'externalid': 'java', 'extension': '.java'},
-            {'code': 'cpp', 'name': 'C++', 'externalid': 'cpp', 'extension': '.cpp'},
             {'code': 'c', 'name': 'C', 'externalid': 'c', 'extension': '.c'},
-            {'code': 'javascript', 'name': 'JavaScript', 'externalid': 'javascript', 'extension': '.js'},
+            {'code': 'cpp', 'name': 'C++', 'externalid': 'cpp', 'extension': '.cpp'},
+            {'code': 'java', 'name': 'Java', 'externalid': 'java', 'extension': '.java'},
+            {'code': 'python3', 'name': 'Python 3', 'externalid': 'py3', 'extension': '.py'},
         ]
         
         for lang_data in language_data:
@@ -363,7 +362,7 @@ class DataFaker:
     
     def _generate_fake_code(self, language_code):
         """Tạo code giả"""
-        if language_code == 'python':
+        if language_code == 'python3':
             return """def solve():
     n = int(input())
     arr = list(map(int, input().split()))
@@ -388,7 +387,7 @@ public class Solution {
     }
 }
 """
-        else:
+        elif language_code == 'cpp':
             return """#include <iostream>
 using namespace std;
 
@@ -402,6 +401,22 @@ int main() {
         result += x;
     }
     cout << result << endl;
+    return 0;
+}
+"""
+        else:  # C
+            return """#include <stdio.h>
+
+int main() {
+    int n;
+    scanf("%d", &n);
+    int result = 0;
+    for (int i = 0; i < n; i++) {
+        int x;
+        scanf("%d", &x);
+        result += x;
+    }
+    printf("%d\\n", result);
     return 0;
 }
 """
