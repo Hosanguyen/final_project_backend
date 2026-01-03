@@ -121,10 +121,39 @@ class ContestListView(APIView):
         if visibility_filter:
             contests = contests.filter(visibility=visibility_filter)
         
-        serializer = ContestListSerializer(contests, many=True)
+        # Search by title
+        search = request.query_params.get('search', None)
+        if search:
+            contests = contests.filter(title__icontains=search)
+        
+        # Order by
+        contests = contests.order_by('-created_at')
+        
+        # Pagination
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+        
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 10000:
+            page_size = 10
+        
+        total_count = contests.count()
+        paginator = Paginator(contests, page_size)
+        
+        try:
+            contests_page = paginator.page(page)
+        except EmptyPage:
+            contests_page = paginator.page(paginator.num_pages) if paginator.num_pages > 0 else []
+        
+        serializer = ContestListSerializer(contests_page, many=True)
         return Response({
             'contests': serializer.data,
-            'total': contests.count()
+            'total': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': paginator.num_pages
         }, status=status.HTTP_200_OK)
 
 
@@ -395,7 +424,7 @@ class ContestDetailUserView(APIView):
             # Validate pagination parameters
             if page < 1:
                 page = 1
-            if page_size < 1 or page_size > 100:
+            if page_size < 1 or page_size > 10000:
                 page_size = 20
             
             # Get all contest problems
@@ -710,8 +739,8 @@ class ContestUserCandidatesView(APIView):
             page = 1
         if page_size < 1:
             page_size = 20
-        if page_size > 100:
-            page_size = 100
+        if page_size > 10000:
+            page_size = 10000
 
         queryset = User.objects.all()
 

@@ -9,6 +9,7 @@ from django.shortcuts import redirect
 from django.http import HttpResponse, StreamingHttpResponse, FileResponse, Http404
 from django.views.decorators.http import require_GET
 from django.conf import settings
+from django.core.paginator import Paginator, EmptyPage
 import uuid
 import os
 import mimetypes
@@ -150,8 +151,32 @@ class CourseView(APIView):
         ordering = request.query_params.get('ordering', '-created_at')
         courses = courses.distinct().order_by(ordering)
         
-        serializer = CourseSerializer(courses, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        # Pagination
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+        
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 10000:
+            page_size = 10
+        
+        total_count = courses.count()
+        paginator = Paginator(courses, page_size)
+        
+        try:
+            courses_page = paginator.page(page)
+        except EmptyPage:
+            courses_page = paginator.page(paginator.num_pages) if paginator.num_pages > 0 else []
+        
+        serializer = CourseSerializer(courses_page, many=True)
+        return Response({
+            'results': serializer.data,
+            'total': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': paginator.num_pages
+        }, status=status.HTTP_200_OK)
 
     def post(self, request):
         """Tạo course mới"""
