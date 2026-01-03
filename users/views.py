@@ -7,6 +7,8 @@ from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django.apps import apps
+from django.core.paginator import Paginator, EmptyPage
+from django.db.models import Q
 from datetime import datetime
 
 from .models import User, RevokedToken, Role, Permission, PermissionCategory
@@ -209,10 +211,52 @@ class AdminCRUDUser(APIView):
             serializer = UserWithRolesSerializer(user)
             return Response(serializer.data, status=status.HTTP_200_OK)
         
-        # Nếu không có id thì trả về danh sách
+        # Lấy danh sách users với phân trang
         users = User.objects.all()
-        serializer = UserWithRolesSerializer(users, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        # Search by username, email, or full_name
+        search = request.query_params.get('search', None)
+        if search:
+            users = users.filter(
+                Q(username__icontains=search) |
+                Q(email__icontains=search) |
+                Q(full_name__icontains=search)
+            )
+        
+        # Filter by active status
+        active_filter = request.query_params.get('active', None)
+        if active_filter is not None:
+            users = users.filter(active=active_filter.lower() == 'true')
+        
+        # Order by
+        users = users.order_by('-created_at')
+        
+        # Pagination
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+        
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 10000:
+            page_size = 10
+        
+        total_count = users.count()
+        paginator = Paginator(users, page_size)
+        
+        try:
+            users_page = paginator.page(page)
+        except EmptyPage:
+            users_page = paginator.page(paginator.num_pages) if paginator.num_pages > 0 else []
+        
+        serializer = UserWithRolesSerializer(users_page, many=True)
+        return Response({
+            'results': serializer.data,
+            'total': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': paginator.num_pages
+        }, status=status.HTTP_200_OK)
     
     def put(self, request, id):
         user = get_object_or_404(User, id=id)
@@ -453,9 +497,42 @@ class PermissionListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        permissions = Permission.objects.all().select_related('category').order_by('code')
-        serializer = PermissionListSerializer(permissions, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        permissions = Permission.objects.all().select_related('category').order_by('created_at')
+        
+        # Search by code or description
+        search = request.query_params.get('search', None)
+        if search:
+            permissions = permissions.filter(
+                Q(code__icontains=search) |
+                Q(description__icontains=search)
+            )
+        
+        # Pagination
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+        
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 10000:
+            page_size = 10
+        
+        total_count = permissions.count()
+        paginator = Paginator(permissions, page_size)
+        
+        try:
+            permissions_page = paginator.page(page)
+        except EmptyPage:
+            permissions_page = paginator.page(paginator.num_pages) if paginator.num_pages > 0 else []
+        
+        serializer = PermissionListSerializer(permissions_page, many=True)
+        return Response({
+            'results': serializer.data,
+            'total': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': paginator.num_pages
+        }, status=status.HTTP_200_OK)
 
     def post(self, request):
         serializer = PermissionSerializer(data=request.data)
