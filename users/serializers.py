@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, PermissionCategory, Permission, Role, UserRole, ContestRatingChange
+from .models import User, PermissionCategory, Permission, Role, UserRole, ContestRatingChange, EmailOTP
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
@@ -12,6 +12,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         password = validated_data.pop("password")
         user = User(**validated_data)
         user.set_password(password)
+        user.active = False
         user.save()
         return user
 
@@ -443,3 +444,42 @@ class GlobalRankingSerializer(serializers.Serializer):
     contests_participated = serializers.IntegerField()
     contests_won = serializers.IntegerField()
     total_problems_solved = serializers.IntegerField()
+
+
+# ============= OTP SERIALIZERS =============
+
+class SendOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+
+
+class VerifyEmailOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    otp_code = serializers.CharField(required=True, max_length=6, min_length=6)
+
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    
+    def validate_email(self, value):
+        if not User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("Email không tồn tại trong hệ thống")
+        return value
+
+
+class ResetPasswordWithOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    otp_code = serializers.CharField(required=True, max_length=6, min_length=6)
+    new_password = serializers.CharField(required=True, min_length=6, write_only=True)
+    confirm_password = serializers.CharField(required=True, min_length=6, write_only=True)
+    
+    def validate(self, attrs):
+        if attrs['new_password'] != attrs['confirm_password']:
+            raise serializers.ValidationError({
+                "confirm_password": "Mật khẩu xác nhận không khớp"
+            })
+        return attrs
+    
+    def validate_email(self, value):
+        if not User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("Email không tồn tại trong hệ thống")
+        return value

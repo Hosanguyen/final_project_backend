@@ -36,8 +36,14 @@ from .serializers import (
     UserRatingSerializer,
     ContestRatingChangeSerializer,
     GlobalRankingSerializer,
+    # OTP serializers
+    SendOTPSerializer,
+    VerifyEmailOTPSerializer,
+    ForgotPasswordSerializer,
+    ResetPasswordWithOTPSerializer,
 )
 from common.authentication import CustomJWTAuthentication
+from .email_utils import create_otp, send_verification_email, send_password_reset_email, verify_otp
 
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
@@ -52,8 +58,26 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            tokens = get_tokens_for_user(user)
-            return Response({"user": serializer.data, "tokens": tokens}, status=status.HTTP_201_CREATED)
+            
+            try:
+                otp = create_otp(user.email, 'email_verification')
+                send_verification_email(user.email, otp.otp_code)
+                
+                return Response({
+                    "message": "Đăng ký thành công. Vui lòng kiểm tra email để xác thực tài khoản.",
+                    "email": user.email,
+                    "user_id": user.id,
+                    "requires_verification": True
+                }, status=status.HTTP_201_CREATED)
+            except Exception as e:
+                return Response({
+                    "message": "Đăng ký thành công nhưng không thể gửi email xác thực. Bạn có thể yêu cầu gửi lại OTP.",
+                    "email": user.email,
+                    "user_id": user.id,
+                    "requires_verification": True,
+                    "email_error": str(e)
+                }, status=status.HTTP_201_CREATED)
+                
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -917,3 +941,138 @@ class UpdateContestRatingsView(APIView):
             },
             status=status.HTTP_200_OK
         )
+
+
+# ============= OTP VIEWS =============
+
+class SendVerificationOTPView(APIView):
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        serializer = SendOTPSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        email = serializer.validated_data['email']
+        
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({
+                "detail": "Email không tồn tại trong hệ thống"
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        if user.email_verified:
+            return Response({
+                "detail": "Email đã được xác thực"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            otp = create_otp(email, 'email_verification')
+            send_verification_email(email, otp.otp_code)
+            
+            return Response({
+                "message": "Mã OTP đã được gửi đến email của bạn",
+                "email": email
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({
+                "detail": f"Không thể gửi email: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class VerifyEmailView(APIView):
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        serializer = VerifyEmailOTPSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        email = serializer.validated_data['email']
+        otp_code = serializer.validated_data['otp_code']
+        
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({
+                "detail": "Email không tồn tại trong hệ thống"
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        if user.email_verified:
+            return Response({
+                "detail": "Email đã được xác thực"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        is_valid, message = verify_otp(email, otp_code, 'email_verification')
+        
+        if not is_valid:
+            return Response({
+                "detail": message
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        user.email_verified = True
+        user.active = True
+        user.save()
+        
+        tokens = get_tokens_for_user(user)
+        user_data = UserProfileSerializer(user).data
+        
+        return Response({
+            "message": "Xác thực email thành công",
+            "tokens": tokens,
+            "user": user_data
+        }, status=status.HTTP_200_OK)
+
+
+class ForgotPasswordView(APIView):
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        serializer = ForgotPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        email = serializer.validated_data['email']
+        
+        try:
+            otp = create_otp(email, 'password_reset')
+            send_password_reset_email(email, otp.otp_code)
+            
+            return Response({
+                "message": "Mã OTP đã được gửi đến email của bạn",
+                "email": email
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({
+                "detail": f"Không thể gửi email: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ResetPasswordWithOTPView(APIView):
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        serializer = ResetPasswordWithOTPSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        email = serializer.validated_data['email']
+        otp_code = serializer.validated_data['otp_code']
+        new_password = serializer.validated_data['new_password']
+        
+        is_valid, message = verify_otp(email, otp_code, 'password_reset')
+        
+        if not is_valid:
+            return Response({
+                "detail": message
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            user = User.objects.get(email=email)
+            user.set_password(new_password)
+            user.save(update_fields=['password'])
+            
+            return Response({
+                "message": "Đặt lại mật khẩu thành công"
+            }, status=status.HTTP_200_OK)
+        except User.DoesNotExist:
+            return Response({
+                "detail": "Email không tồn tại trong hệ thống"
+            }, status=status.HTTP_404_NOT_FOUND)
