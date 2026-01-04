@@ -82,6 +82,15 @@ services:
       
       # Timezone
       - TZ=${TZ:-Asia/Ho_Chi_Minh}
+
+      - EMAIL_HOST=${EMAIL_HOST}
+      - EMAIL_PORT=${EMAIL_PORT}
+      - EMAIL_USE_TLS=${EMAIL_USE_TLS}
+      - EMAIL_HOST_USER=${EMAIL_HOST_USER}
+      - EMAIL_HOST_PASSWORD=${EMAIL_HOST_PASSWORD}
+      - DEFAULT_FROM_EMAIL=${DEFAULT_FROM_EMAIL}
+      - OTP_EXPIRY_MINUTES=${OTP_EXPIRY_MINUTES}
+      - OTP_LENGTH=${OTP_LENGTH}
     
     volumes:
       - ./media:/app/media

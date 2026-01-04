@@ -27,6 +27,11 @@ from .views import (
     UserRatingDetailView,
     UserRatingHistoryView,
     UpdateContestRatingsView,
+    # OTP views
+    SendVerificationOTPView,
+    VerifyEmailView,
+    ForgotPasswordView,
+    ResetPasswordWithOTPView,
 )
 
 # Public Profile Views
@@ -101,6 +106,12 @@ urlpatterns = [
     
     # Admin: update contest ratings
     path('rating/contest/<int:contest_id>/update/', UpdateContestRatingsView.as_view(), name='update-contest-ratings'),
+
+    # ============= OTP & EMAIL VERIFICATION ENDPOINTS =============
+    path('otp/send-verification/', SendVerificationOTPView.as_view(), name='send-verification-otp'),
+    path('otp/verify-email/', VerifyEmailView.as_view(), name='verify-email'),
+    path('otp/forgot-password/', ForgotPasswordView.as_view(), name='forgot-password'),
+    path('otp/reset-password/', ResetPasswordWithOTPView.as_view(), name='reset-password-otp'),
 
     # ============= USER REPORTS ENDPOINTS (ADMIN) =============
     # Statistics overview

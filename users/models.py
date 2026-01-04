@@ -64,11 +64,11 @@ class User(models.Model):
     password = models.CharField(max_length=255)
 
     active = models.BooleanField(default=True)
+    email_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(blank=True, null=True)
 
-    # profile optional
     full_name = models.CharField(max_length=200, blank=True, null=True)
     avatar_url = models.ImageField(upload_to="images/avatars/", blank=True, null=True)
     description = models.TextField(blank=True, null=True)
@@ -266,3 +266,36 @@ class ContestRatingChange(models.Model):
     def __str__(self):
         sign = '+' if self.rating_change >= 0 else ''
         return f"{self.user.username} - {self.contest.title}: {sign}{self.rating_change}"
+
+
+# ============= EMAIL OTP MODEL =============
+
+class EmailOTP(models.Model):
+    OTP_TYPE_CHOICES = [
+        ('email_verification', 'Email Verification'),
+        ('password_reset', 'Password Reset'),
+    ]
+    
+    id = models.BigAutoField(primary_key=True)
+    email = models.EmailField(db_index=True)
+    otp_code = models.CharField(max_length=6)
+    otp_type = models.CharField(max_length=20, choices=OTP_TYPE_CHOICES)
+    
+    is_used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        db_table = "email_otps"
+        indexes = [
+            models.Index(fields=['email', 'otp_type', 'is_used']),
+            models.Index(fields=['expires_at']),
+        ]
+        ordering = ['-created_at']
+    
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+    
+    def __str__(self):
+        return f"{self.email} - {self.otp_type} - {self.otp_code}"
