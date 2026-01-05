@@ -130,8 +130,8 @@ class HelloAPIView(APIView):
     permission_classes = [IsAuthenticated]  # bắt buộc phải có token
 
     def get(self, request):
-        if request.user.has_perm('admin', 'users.read'):
-            print("User has users.read permission")
+        # if request.user.has_perm( 'users.read'):
+        #     print("User has users.read permission")
         return Response({
             "message": f"Hello, {request.user.username}! Token của bạn hợp lệ."
         })
@@ -221,6 +221,12 @@ class AdminCRUDUser(APIView):
     # permission_classes = [IsAdminUser]
 
     def post(self, request):
+        if not request.user.has_perm('users.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo user. Yêu cầu quyền: users.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
@@ -229,6 +235,12 @@ class AdminCRUDUser(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
     def get(self, request, id=None):
+        if not request.user.has_perm('users.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách user. Yêu cầu quyền: users.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         # Nếu có id thì trả về chi tiết user
         if id:
             user = get_object_or_404(User, id=id)
@@ -283,6 +295,12 @@ class AdminCRUDUser(APIView):
         }, status=status.HTTP_200_OK)
     
     def put(self, request, id):
+        if not request.user.has_perm('users.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật user. Yêu cầu quyền: users.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         user = get_object_or_404(User, id=id)
         serializer = AdminUpdateUserSerializer(user, data=request.data, partial=True)
         if serializer.is_valid():
@@ -294,6 +312,12 @@ class AdminCRUDUser(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     def delete(self, request, id):
+        if not request.user.has_perm('users.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa user. Yêu cầu quyền: users.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         user = get_object_or_404(User, id=id)
         username = user.username 
         user.delete()
@@ -316,6 +340,12 @@ class UserAssignRolesView(APIView):
             "role_ids": [1, 2, 3]
         }
         """
+        if not request.user.has_perm('user_roles.create'):
+            return Response(
+                {"detail": "Bạn không có quyền gán role cho user. Yêu cầu quyền: user_roles.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         user = get_object_or_404(User, id=user_id)
         serializer = AssignRolesToUserSerializer(data=request.data)
         
@@ -352,6 +382,12 @@ class UserRemoveRolesView(APIView):
             "role_ids": [1, 2]
         }
         """
+        if not request.user.has_perm('user_roles.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa role khỏi user. Yêu cầu quyền: user_roles.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         user = get_object_or_404(User, id=user_id)
         serializer = RemoveRolesFromUserSerializer(data=request.data)
         
@@ -463,11 +499,23 @@ class PermissionCategoryListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if not request.user.has_perm('permission_categories.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh mục quyền. Yêu cầu quyền: permission_categories.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         categories = PermissionCategory.objects.all().order_by('name')
         serializer = PermissionCategoryListSerializer(categories, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def post(self, request):
+        if not request.user.has_perm('permission_categories.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo danh mục quyền. Yêu cầu quyền: permission_categories.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         serializer = PermissionCategorySerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -486,11 +534,23 @@ class PermissionCategoryDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, id):
+        if not request.user.has_perm('permission_categories.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh mục quyền. Yêu cầu quyền: permission_categories.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         category = get_object_or_404(PermissionCategory, id=id)
         serializer = PermissionCategorySerializer(category)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request, id):
+        if not request.user.has_perm('permission_categories.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật danh mục quyền. Yêu cầu quyền: permission_categories.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         category = get_object_or_404(PermissionCategory, id=id)
         serializer = PermissionCategorySerializer(category, data=request.data, partial=True)
         if serializer.is_valid():
@@ -505,6 +565,12 @@ class PermissionCategoryDetailView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, id):
+        if not request.user.has_perm('permission_categories.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa danh mục quyền. Yêu cầu quyền: permission_categories.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         category = get_object_or_404(PermissionCategory, id=id)
         category_name = category.name
         category.delete()
@@ -521,6 +587,12 @@ class PermissionListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if not request.user.has_perm('permissions.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách quyền. Yêu cầu quyền: permissions.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         permissions = Permission.objects.all().select_related('category').order_by('created_at')
         
         # Search by code or description
@@ -559,6 +631,12 @@ class PermissionListCreateView(APIView):
         }, status=status.HTTP_200_OK)
 
     def post(self, request):
+        if not request.user.has_perm('permissions.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo quyền. Yêu cầu quyền: permissions.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         serializer = PermissionSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -577,11 +655,23 @@ class PermissionDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, id):
+        if not request.user.has_perm('permissions.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem quyền. Yêu cầu quyền: permissions.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         permission = get_object_or_404(Permission.objects.select_related('category'), id=id)
         serializer = PermissionSerializer(permission)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request, id):
+        if not request.user.has_perm('permissions.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật quyền. Yêu cầu quyền: permissions.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         permission = get_object_or_404(Permission, id=id)
         serializer = PermissionSerializer(permission, data=request.data, partial=True)
         if serializer.is_valid():
@@ -596,6 +686,12 @@ class PermissionDetailView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, id):
+        if not request.user.has_perm('permissions.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa quyền. Yêu cầu quyền: permissions.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         permission = get_object_or_404(Permission, id=id)
         permission_code = permission.code
         permission.delete()
@@ -616,11 +712,23 @@ class RoleListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if not request.user.has_perm('roles.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách role. Yêu cầu quyền: roles.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         roles = Role.objects.all().order_by('name')
         serializer = RoleListSerializer(roles, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def post(self, request):
+        if not request.user.has_perm('roles.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo role. Yêu cầu quyền: roles.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         serializer = RoleCreateUpdateSerializer(data=request.data)
         if serializer.is_valid():
             role = serializer.save()
@@ -641,6 +749,12 @@ class RoleDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, id):
+        if not request.user.has_perm('roles.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem role. Yêu cầu quyền: roles.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         role = get_object_or_404(
             Role.objects.prefetch_related('permissions__category'), 
             id=id
@@ -649,6 +763,12 @@ class RoleDetailView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request, id):
+        if not request.user.has_perm('roles.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật role. Yêu cầu quyền: roles.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         role = get_object_or_404(Role, id=id)
         serializer = RoleCreateUpdateSerializer(role, data=request.data, partial=True)
         
@@ -666,6 +786,12 @@ class RoleDetailView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, id):
+        if not request.user.has_perm('roles.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa role. Yêu cầu quyền: roles.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         role = get_object_or_404(Role, id=id)
         role_name = role.name
         
@@ -701,6 +827,12 @@ class RoleAssignPermissionsView(APIView):
             "permission_ids": [7, 8, 9]
         }
         """
+        if not request.user.has_perm('role_permissions.create'):
+            return Response(
+                {"detail": "Bạn không có quyền gán quyền cho role. Yêu cầu quyền: role_permissions.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         role = get_object_or_404(Role, id=role_id)
         serializer = AssignPermissionsToRoleSerializer(data=request.data)
         
@@ -737,6 +869,12 @@ class RoleRemovePermissionsView(APIView):
             "permission_ids": [7, 8]
         }
         """
+        if not request.user.has_perm('role_permissions.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa quyền khỏi role. Yêu cầu quyền: role_permissions.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         role = get_object_or_404(Role, id=role_id)
         serializer = RemovePermissionsFromRoleSerializer(data=request.data)
         
@@ -770,6 +908,12 @@ class AllPermissionsForSelectionView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if not request.user.has_perm('permissions.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách quyền. Yêu cầu quyền: permissions.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         categories = PermissionCategory.objects.prefetch_related('permission_set').all()
         
         result = []
@@ -794,6 +938,12 @@ class AllRolesForSelectionView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if not request.user.has_perm('roles.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách role. Yêu cầu quyền: roles.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         from .serializers import RoleSimpleSerializer
         roles = Role.objects.all().order_by('name')
         serializer = RoleSimpleSerializer(roles, many=True)
@@ -919,12 +1069,18 @@ class UpdateContestRatingsView(APIView):
     def post(self, request, contest_id):
         from .rating_service import RatingService
         
-        # Check if user is admin
-        if not request.user.is_staff:
+        if not request.user.has_perm('contest_rating_changes.create'):
             return Response(
-                {"detail": "Only admin can update contest ratings"},
+                {"detail": "Bạn không có quyền cập nhật rating contest. Yêu cầu quyền: contest_rating_changes.create"},
                 status=status.HTTP_403_FORBIDDEN
             )
+        
+        # Check if user is admin
+        # if not request.user.is_staff:
+        #     return Response(
+        #         {"detail": "Only admin can update contest ratings"},
+        #         status=status.HTTP_403_FORBIDDEN
+        #     )
         
         updated_count = RatingService.update_contest_ratings(contest_id)
         

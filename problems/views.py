@@ -32,6 +32,12 @@ class ProblemListCreateView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        if not request.user.has_perm('problems.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách problems. Yêu cầu quyền: problems.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         # ... existing GET code - KHÔNG THAY ĐỔI ...
         problems = Problem.objects.all()
         
@@ -81,6 +87,12 @@ class ProblemListCreateView(APIView):
         })
     
     def post(self, request):
+        if not request.user.has_perm('problems.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo problem. Yêu cầu quyền: problems.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         data = request.data.dict()  # ← Chuyển QueryDict → dict thường
         
         # Parse test_cases từ JSON string
@@ -187,12 +199,24 @@ class ProblemDetailView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, id):
+        if not request.user.has_perm('problems.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem chi tiết problem. Yêu cầu quyền: problems.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         # ... existing GET code - KHÔNG THAY ĐỔI ...
         problem = get_object_or_404(Problem, id=id)
         serializer = ProblemDetailSerializer(problem)
         return Response(serializer.data)
     
     def put(self, request, id):
+        if not request.user.has_perm('problems.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật problem. Yêu cầu quyền: problems.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         problem = get_object_or_404(Problem, id=id)
         data = request.data.dict()  # ← Chuyển QueryDict → dict thường
         
@@ -291,6 +315,11 @@ class ProblemDetailView(APIView):
         })
     
     def delete(self, request, id):
+        if not request.user.has_perm('problems.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa problem. Yêu cầu quyền: problems.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
         # ... existing DELETE code - KHÔNG THAY ĐỔI ...
         problem = get_object_or_404(Problem, id=id)
         
@@ -319,6 +348,12 @@ class ProblemTestCasesView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, problem_id):
+        if not request.user.has_perm('test_cases.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem test cases. Yêu cầu quyền: test_cases.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         problem = get_object_or_404(Problem, id=problem_id)
         test_cases = problem.test_cases.all()
         serializer = TestCaseSerializer(test_cases, many=True)
@@ -330,6 +365,12 @@ class ProblemTestCasesView(APIView):
         })
     
     def post(self, request, problem_id):
+        if not request.user.has_perm('test_cases.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo test case. Yêu cầu quyền: test_cases.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         problem = get_object_or_404(Problem, id=problem_id)
         serializer = TestCaseCreateSerializer(data=request.data)
         
@@ -379,11 +420,23 @@ class TestCaseDetailView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, problem_id, testcase_id):
+        if not request.user.has_perm('test_cases.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem test case. Yêu cầu quyền: test_cases.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         test_case = get_object_or_404(TestCase, id=testcase_id, problem_id=problem_id)
         serializer = TestCaseSerializer(test_case)
         return Response(serializer.data)
     
     def put(self, request, problem_id, testcase_id):
+        if not request.user.has_perm('test_cases.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật test case. Yêu cầu quyền: test_cases.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         test_case = get_object_or_404(TestCase, id=testcase_id, problem_id=problem_id)
         serializer = TestCaseCreateSerializer(test_case, data=request.data, partial=True)
         
@@ -421,6 +474,12 @@ class TestCaseDetailView(APIView):
         })
     
     def delete(self, request, problem_id, testcase_id):
+        if not request.user.has_perm('test_cases.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa test case. Yêu cầu quyền: test_cases.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         test_case = get_object_or_404(TestCase, id=testcase_id, problem_id=problem_id)
         problem = test_case.problem
         
@@ -448,6 +507,11 @@ class ProblemStatisticsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, id):
+        if not request.user.has_perm('problems.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem thống kê problem. Yêu cầu quyền: problems.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
         from contests.models import Contest, ContestProblem
         from django.db.models import Count, Avg, Max, Min
         from datetime import datetime, timedelta
@@ -544,6 +608,12 @@ class SubmissionCreateView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request, problem_id):
+        if not request.user.has_perm('submissions.create'):
+            return Response(
+                {"detail": "Bạn không có quyền submit code. Yêu cầu quyền: submissions.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         from .models import Submissions
         from course.models import Language
         from .serializers import SubmissionCreateSerializer, SubmissionSerializer
@@ -649,6 +719,12 @@ class SubmissionListView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, problem_id=None):
+        if not request.user.has_perm('submissions.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem submissions. Yêu cầu quyền: submissions.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         from .models import Submissions
         from .serializers import SubmissionListSerializer
         from contests.models import Contest
@@ -774,6 +850,12 @@ class SubmissionDetailView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, submission_id):
+        if not request.user.has_perm('submissions.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem submission. Yêu cầu quyền: submissions.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         from .models import Submissions
         from .serializers import SubmissionSerializer
         
@@ -862,6 +944,12 @@ class ProblemRecommendationView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        if not request.user.has_perm('problems.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem gợi ý problems. Yêu cầu quyền: problems.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         import os
         from django.conf import settings
         

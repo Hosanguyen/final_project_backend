@@ -139,11 +139,11 @@ class User(models.Model):
             return True
         return False
 
-    def has_perm(self, role_name, perm_code):
-        if not self.has_role(role_name):
-            return False
-        user_permissions = Permission.objects.filter(roles__users=self).values_list('code', flat=True)
-        return perm_code in user_permissions
+    def has_perm(self,  perm_code):
+        return Permission.objects.filter(
+            roles__users=self,
+            code=perm_code
+        ).exists()
     
     def has_role(self, role_name):
         return self.roles.filter(name=role_name).exists()

@@ -14,6 +14,7 @@ from .serializers import (
     QuizSubmissionSerializer, QuizSubmissionCreateSerializer,
     QuizAnswerSubmitSerializer
 )
+from rest_framework.permissions import IsAuthenticated
 
 
 # ============================================================
@@ -26,8 +27,15 @@ class QuizListView(APIView):
     POST: Tạo quiz mới (với questions)
     """
     authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if not request.user.has_perm('quizzes.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách quiz. Yêu cầu quyền: quizzes.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         quizzes = Quiz.objects.all().order_by('-created_at')
         
         # Filter by published status
@@ -65,6 +73,12 @@ class QuizListView(APIView):
         }, status=status.HTTP_200_OK)
 
     def post(self, request):
+        if not request.user.has_perm('quizzes.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo quiz. Yêu cầu quyền: quizzes.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         serializer = QuizCreateSerializer(data=request.data)
         if serializer.is_valid():
             quiz = serializer.save(created_by=request.user)
@@ -82,11 +96,23 @@ class QuizDetailView(APIView):
     authentication_classes = [CustomJWTAuthentication]
 
     def get(self, request, pk):
+        if not request.user.has_perm('quizzes.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem chi tiết quiz. Yêu cầu quyền: quizzes.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         quiz = get_object_or_404(Quiz, pk=pk)
         serializer = QuizDetailSerializer(quiz)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request, pk):
+        if not request.user.has_perm('quizzes.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật quiz. Yêu cầu quyền: quizzes.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         quiz = get_object_or_404(Quiz, pk=pk)
         serializer = QuizUpdateSerializer(quiz, data=request.data)
         if serializer.is_valid():
@@ -96,6 +122,12 @@ class QuizDetailView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
+        if not request.user.has_perm('quizzes.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa quiz. Yêu cầu quyền: quizzes.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         quiz = get_object_or_404(Quiz, pk=pk)
         quiz.delete()
         return Response(
@@ -115,6 +147,12 @@ class QuizSubmissionStartView(APIView):
     authentication_classes = [CustomJWTAuthentication]
 
     def post(self, request):
+        if not request.user.has_perm('quiz_submissions.create'):
+            return Response(
+                {"detail": "Bạn không có quyền bắt đầu làm quiz. Yêu cầu quyền: quiz_submissions.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         serializer = QuizSubmissionCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -193,6 +231,12 @@ class QuizSubmissionAnswerView(APIView):
     authentication_classes = [CustomJWTAuthentication]
 
     def post(self, request, submission_id):
+        if not request.user.has_perm('quiz_answers.create'):
+            return Response(
+                {"detail": "Bạn không có quyền trả lời câu hỏi quiz. Yêu cầu quyền: quiz_answers.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         submission = get_object_or_404(
             QuizSubmission,
             pk=submission_id,
@@ -263,6 +307,12 @@ class QuizSubmissionSubmitView(APIView):
     authentication_classes = [CustomJWTAuthentication]
 
     def post(self, request, submission_id):
+        if not request.user.has_perm('quiz_submissions.create'):
+            return Response(
+                {"detail": "Bạn không có quyền nộp bài quiz. Yêu cầu quyền: quiz_submissions.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         submission = get_object_or_404(
             QuizSubmission,
             pk=submission_id,
@@ -351,6 +401,12 @@ class QuizSubmissionListView(APIView):
     authentication_classes = [CustomJWTAuthentication]
 
     def get(self, request):
+        if not request.user.has_perm('quiz_submissions.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách bài làm quiz. Yêu cầu quyền: quiz_submissions.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         submissions = QuizSubmission.objects.filter(
             user=request.user
         ).order_by('-started_at')
@@ -402,6 +458,12 @@ class QuizSubmissionDetailView(APIView):
     authentication_classes = [CustomJWTAuthentication]
 
     def get(self, request, submission_id):
+        if not request.user.has_perm('quiz_submissions.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem chi tiết bài làm quiz. Yêu cầu quyền: quiz_submissions.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         submission = get_object_or_404(
             QuizSubmission,
             pk=submission_id,
