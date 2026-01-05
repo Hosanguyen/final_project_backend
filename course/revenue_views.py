@@ -18,6 +18,12 @@ class RevenueStatisticsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if not request.user.has_perm('orders.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem thống kê doanh thu. Yêu cầu quyền: orders.read"},
+                status=403
+            )
+        
         # Lấy tham số month (optional)
         month_param = request.query_params.get('month', None)
         
