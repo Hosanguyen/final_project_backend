@@ -1003,17 +1003,26 @@ class ProblemRecommendationView(APIView):
                     is_synced_to_domjudge=True
                 ).exclude(id__in=solved_ids)[:n_recommendations]
                 
+                # Lấy trước contest_problem cho contest "practice"
+                contest_problem_map = {
+                    cp.problem_id: cp.id
+                    for cp in ContestProblem.objects
+                        .filter(contest__slug='practice', problem__in=unsolved_problems)
+                }
+
                 recommendations = [
                     {
                         'problem_id': p.id,
                         'title': p.title,
+                        'contest_problem_id': contest_problem_map.get(p.id),
                         'difficulty': p.difficulty,
                         'rating': p.rating,
-                        'tags': [tag.name for tag in p.tags.all()],
+                        'tags': list(p.tags.values_list('name', flat=True)),
                         'score': 0.0
                     }
                     for p in unsolved_problems
                 ]
+
             
             return Response({
                 'user_id': user.id,
