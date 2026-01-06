@@ -8,6 +8,7 @@ from scipy.sparse import csr_matrix
 from sklearn.preprocessing import MultiLabelBinarizer, MinMaxScaler
 from sklearn.neighbors import NearestNeighbors
 import implicit
+from contests.models import Contest, ContestProblem
 
 
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
@@ -454,9 +455,16 @@ class ProductionRecommender:
             
             # Thêm random factor nhỏ để tạo diversity
             diversity_factor = 1 + (np.random.random() * 0.05)
+
+            contest = Contest.objects.get(slug="practice")
+            problem_contest = ContestProblem.objects.filter(problem_id=prob_id, contest=contest).first()
+
+            if not problem_contest:
+                continue
             
             results.append({
                 'problem_id': int(prob_id),
+                'contest_problem_id': problem_contest.id,
                 'title': prob_info['title'],
                 'tags': prob_info['tags'],
                 'rating': int(prob_info['rating']),
@@ -480,8 +488,16 @@ class ProductionRecommender:
         
         results = []
         for _, prob in easy_problems.iterrows():
+            
+            contest = Contest.objects.get(slug="practice")
+            problem_contest = ContestProblem.objects.filter(problem_id=prob['problem_id'], contest=contest).first()
+
+            if not problem_contest:
+                continue
+            
             results.append({
                 'problem_id': int(prob['problem_id']),
+                'contest_problem_id': problem_contest.id,
                 'title': prob['title'],
                 'tags': prob['tags'],
                 'rating': int(prob['rating']),
