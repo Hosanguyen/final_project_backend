@@ -39,6 +39,11 @@ class UserProblemsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        if not request.user.has_perm('problems.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem problems đã submit. Yêu cầu quyền: problems.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
         try:
             user = request.user
             page = int(request.query_params.get('page', 1))
@@ -133,6 +138,12 @@ class UserSubmissionsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        if not request.user.has_perm('submissions.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem submissions. Yêu cầu quyền: submissions.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             user = request.user
             page = int(request.query_params.get('page', 1))
@@ -204,6 +215,12 @@ class UserRegisteredContestsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        if not request.user.has_perm('contest_participants.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách contests tham gia. Yêu cầu quyền: contest_participants.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             user = request.user
             page = int(request.query_params.get('page', 1))
@@ -269,6 +286,12 @@ class UserStatisticsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        if not request.user.has_perm('submissions.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem thống kê. Yêu cầu quyền: submissions.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             user = request.user
             

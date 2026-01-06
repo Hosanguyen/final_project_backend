@@ -6,8 +6,14 @@ from django.db.models import Q
 from django.utils import timezone
 from django.db import transaction
 from django.shortcuts import redirect
-from django.http import HttpResponse
+from django.http import HttpResponse, StreamingHttpResponse, FileResponse, Http404
+from django.views.decorators.http import require_GET
+from django.conf import settings
+from django.core.paginator import Paginator, EmptyPage
 import uuid
+import os
+import mimetypes
+import re
 
 from common.authentication import CustomJWTAuthentication
 from .models import Language, Course, Lesson, LessonResource, Tag, File, Order, Enrollment
@@ -31,11 +37,17 @@ class LanguageView(APIView):
 
     # Lấy danh sách hoặc tạo mới
     def get(self, request):
-        languages = Language.objects.all().order_by("name")
+        languages = Language.objects.all().order_by("id")
         serializer = LanguageSerializer(languages, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def post(self, request):
+        if not request.user.has_perm('languages.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo language. Yêu cầu quyền: languages.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         serializer = LanguageSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -55,6 +67,12 @@ class LanguageDetailView(APIView):
 
     # Lấy chi tiết
     def get(self, request, pk):
+        if not request.user.has_perm('languages.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem language. Yêu cầu quyền: languages.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         language = self.get_object(pk)
         if not language:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -63,6 +81,12 @@ class LanguageDetailView(APIView):
 
     # Cập nhật
     def put(self, request, pk):
+        if not request.user.has_perm('languages.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật language. Yêu cầu quyền: languages.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         language = self.get_object(pk)
         if not language:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -74,6 +98,12 @@ class LanguageDetailView(APIView):
 
     # Cập nhật một phần (PATCH)
     def patch(self, request, pk):
+        if not request.user.has_perm('languages.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật language. Yêu cầu quyền: languages.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         language = self.get_object(pk)
         if not language:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -85,6 +115,12 @@ class LanguageDetailView(APIView):
 
     # Xóa
     def delete(self, request, pk):
+        if not request.user.has_perm('languages.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa language. Yêu cầu quyền: languages.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         language = self.get_object(pk)
         if not language:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -145,11 +181,41 @@ class CourseView(APIView):
         ordering = request.query_params.get('ordering', '-created_at')
         courses = courses.distinct().order_by(ordering)
         
-        serializer = CourseSerializer(courses, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        # Pagination
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+        
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 10000:
+            page_size = 10
+        
+        total_count = courses.count()
+        paginator = Paginator(courses, page_size)
+        
+        try:
+            courses_page = paginator.page(page)
+        except EmptyPage:
+            courses_page = paginator.page(paginator.num_pages) if paginator.num_pages > 0 else []
+        
+        serializer = CourseSerializer(courses_page, many=True)
+        return Response({
+            'results': serializer.data,
+            'total': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': paginator.num_pages
+        }, status=status.HTTP_200_OK)
 
     def post(self, request):
         """Tạo course mới"""
+        if not request.user.has_perm('courses.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo course. Yêu cầu quyền: courses.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         # Handle banner file upload
         banner_file = request.FILES.get('banner_file')
         data = request.data.copy()
@@ -208,6 +274,12 @@ class CourseDetailView(APIView):
 
     def put(self, request, pk=None, slug=None):
         """Cập nhật course"""
+        if not request.user.has_perm('courses.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật course. Yêu cầu quyền: courses.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         course = self.get_object(pk=pk, slug=slug)
         if not course:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -235,6 +307,12 @@ class CourseDetailView(APIView):
 
     def patch(self, request, pk=None, slug=None):
         """Cập nhật một phần course"""
+        if not request.user.has_perm('courses.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật course. Yêu cầu quyền: courses.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         course = self.get_object(pk=pk, slug=slug)
         if not course:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -262,6 +340,12 @@ class CourseDetailView(APIView):
 
     def delete(self, request, pk):
         """Xóa course"""
+        if not request.user.has_perm('courses.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa course. Yêu cầu quyền: courses.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         course = self.get_object(pk)
         if not course:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -276,6 +360,12 @@ class LessonView(APIView):
 
     def get(self, request):
         """Lấy danh sách lessons"""
+        if not request.user.has_perm('lessons.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem lesson. Yêu cầu quyền: lessons.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         lessons = Lesson.objects.select_related('course').prefetch_related('resources', 'lesson_quizzes__quiz')
         
         # Filter by course (support both course_id and course)
@@ -299,6 +389,12 @@ class LessonView(APIView):
 
     def post(self, request):
         """Tạo lesson mới"""
+        if not request.user.has_perm('lessons.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo lesson. Yêu cầu quyền: lessons.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         serializer = LessonSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -318,6 +414,12 @@ class LessonDetailView(APIView):
 
     def get(self, request, pk):
         """Lấy chi tiết lesson"""
+        if not request.user.has_perm('lessons.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem lesson. Yêu cầu quyền: lessons.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             lesson = Lesson.objects.select_related('course').prefetch_related('resources__file', 'lesson_quizzes__quiz').get(pk=pk)
         except Lesson.DoesNotExist:
@@ -328,6 +430,12 @@ class LessonDetailView(APIView):
 
     def put(self, request, pk):
         """Cập nhật lesson"""
+        if not request.user.has_perm('lessons.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật lesson. Yêu cầu quyền: lessons.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         lesson = self.get_object(pk)
         if not lesson:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -339,6 +447,12 @@ class LessonDetailView(APIView):
 
     def patch(self, request, pk):
         """Cập nhật một phần lesson"""
+        if not request.user.has_perm('lessons.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật lesson. Yêu cầu quyền: lessons.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         lesson = self.get_object(pk)
         if not lesson:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -350,6 +464,12 @@ class LessonDetailView(APIView):
 
     def delete(self, request, pk):
         """Xóa lesson"""
+        if not request.user.has_perm('lessons.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa lesson. Yêu cầu quyền: lessons.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         lesson = self.get_object(pk)
         if not lesson:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -364,6 +484,12 @@ class LessonResourceView(APIView):
 
     def get(self, request):
         """Lấy danh sách lesson resources"""
+        if not request.user.has_perm('lesson_resources.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem lesson resource. Yêu cầu quyền: lesson_resources.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         resources = LessonResource.objects.all()
         
         # Filter by lesson
@@ -384,6 +510,12 @@ class LessonResourceView(APIView):
 
     def post(self, request):
         """Tạo lesson resource mới"""
+        if not request.user.has_perm('lesson_resources.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo lesson resource. Yêu cầu quyền: lesson_resources.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         # Debug logging
         print("=== LessonResource POST Debug ===")
         print(f"request.data: {request.data}")
@@ -442,6 +574,12 @@ class LessonResourceDetailView(APIView):
 
     def get(self, request, pk):
         """Lấy chi tiết lesson resource"""
+        if not request.user.has_perm('lesson_resources.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem lesson resource. Yêu cầu quyền: lesson_resources.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         resource = self.get_object(pk)
         if not resource:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -450,6 +588,12 @@ class LessonResourceDetailView(APIView):
 
     def put(self, request, pk):
         """Cập nhật lesson resource"""
+        if not request.user.has_perm('lesson_resources.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật lesson resource. Yêu cầu quyền: lesson_resources.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         resource = self.get_object(pk)
         if not resource:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -508,6 +652,12 @@ class LessonResourceDetailView(APIView):
 
     def patch(self, request, pk):
         """Cập nhật một phần lesson resource"""
+        if not request.user.has_perm('lesson_resources.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật lesson resource. Yêu cầu quyền: lesson_resources.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         resource = self.get_object(pk)
         if not resource:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -519,6 +669,12 @@ class LessonResourceDetailView(APIView):
 
     def delete(self, request, pk):
         """Xóa lesson resource"""
+        if not request.user.has_perm('lesson_resources.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa lesson resource. Yêu cầu quyền: lesson_resources.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         resource = self.get_object(pk)
         if not resource:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -545,6 +701,12 @@ class TagView(APIView):
 
     def post(self, request):
         """Tạo tag mới"""
+        if not request.user.has_perm('tags.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo tag. Yêu cầu quyền: tags.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         serializer = TagSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -564,6 +726,12 @@ class TagDetailView(APIView):
 
     def get(self, request, pk):
         """Lấy chi tiết tag"""
+        if not request.user.has_perm('tags.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem tag. Yêu cầu quyền: tags.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         tag = self.get_object(pk)
         if not tag:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -572,6 +740,12 @@ class TagDetailView(APIView):
 
     def put(self, request, pk):
         """Cập nhật tag"""
+        if not request.user.has_perm('tags.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật tag. Yêu cầu quyền: tags.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         tag = self.get_object(pk)
         if not tag:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -583,6 +757,12 @@ class TagDetailView(APIView):
 
     def delete(self, request, pk):
         """Xóa tag"""
+        if not request.user.has_perm('tags.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa tag. Yêu cầu quyền: tags.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         tag = self.get_object(pk)
         if not tag:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -820,6 +1000,12 @@ class CheckEnrollmentView(APIView):
         Kiểm tra enrollment
         URL: /api/enrollment/check/<course_id>/
         """
+        if not request.user.has_perm('enrollments.read'):
+            return Response(
+                {"detail": "Bạn không có quyền kiểm tra enrollment. Yêu cầu quyền: enrollments.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         is_enrolled = Enrollment.objects.filter(
             user=request.user,
             course_id=course_id
@@ -838,7 +1024,196 @@ class EnrollmentListView(APIView):
 
     def get(self, request):
         """Lấy danh sách khóa học đã đăng ký của user"""
+        if not request.user.has_perm('enrollments.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách enrollment. Yêu cầu quyền: enrollments.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         enrollments = Enrollment.objects.filter(user=request.user).select_related('course')
         serializer = EnrollmentSerializer(enrollments, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class VideoStreamView(APIView):
+    """
+    Video streaming view with support for HTTP Range requests
+    Allows seeking/scrubbing in video player
+    """
+    authentication_classes = []  # Không yêu cầu authentication vì <video> tag không gửi được header
+    permission_classes = [AllowAny]  # Cho phép mọi user access (có thể thêm logic kiểm tra khác)
+
+    def get(self, request, resource_id):
+        """
+        Stream video file with Range request support
+        URL: /api/video/stream/<resource_id>/
+        """
+        try:
+            resource = LessonResource.objects.select_related('lesson__course', 'file').get(
+                id=resource_id,
+                type='video'
+            )
+        except LessonResource.DoesNotExist:
+            raise Http404("Video resource not found")
+
+        # Check if user is enrolled in the course (optional, uncomment if needed)
+        # if resource.lesson and resource.lesson.course:
+        #     is_enrolled = Enrollment.objects.filter(
+        #         user=request.user,
+        #         course=resource.lesson.course
+        #     ).exists()
+        #     if not is_enrolled:
+        #         return Response(
+        #             {"error": "You must be enrolled in this course to access this video"},
+        #             status=status.HTTP_403_FORBIDDEN
+        #         )
+
+        # Get the file
+        if not resource.file or not resource.file.storage_key:
+            raise Http404("Video file not found")
+
+        file_path = resource.file.storage_key.path
+        
+        if not os.path.exists(file_path):
+            raise Http404("Video file not found on disk")
+
+        # Get file size
+        file_size = os.path.getsize(file_path)
+        
+        # Get content type
+        content_type, _ = mimetypes.guess_type(file_path)
+        if content_type is None or not content_type.startswith('video/'):
+            content_type = 'video/mp4'  # Default to mp4
+
+        # Parse Range header
+        range_header = request.META.get('HTTP_RANGE', '').strip()
+        range_match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+
+        if range_match:
+            # Range request - return partial content
+            start = int(range_match.group(1))
+            end = range_match.group(2)
+            end = int(end) if end else file_size - 1
+            
+            # Validate range
+            if start >= file_size or end >= file_size or start > end:
+                response = HttpResponse(status=416)  # Range Not Satisfiable
+                response['Content-Range'] = f'bytes */{file_size}'
+                return response
+            
+            # Calculate content length
+            length = end - start + 1
+            
+            # Open file and seek to start position
+            def file_iterator(file_path, start, length, chunk_size=8192):
+                """Generator to read file in chunks"""
+                with open(file_path, 'rb') as f:
+                    f.seek(start)
+                    remaining = length
+                    while remaining > 0:
+                        chunk_size_to_read = min(chunk_size, remaining)
+                        data = f.read(chunk_size_to_read)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+            
+            # Create streaming response
+            response = StreamingHttpResponse(
+                file_iterator(file_path, start, length),
+                status=206,  # Partial Content
+                content_type=content_type
+            )
+            
+            # Set headers for partial content
+            response['Content-Length'] = str(length)
+            response['Content-Range'] = f'bytes {start}-{end}/{file_size}'
+            response['Accept-Ranges'] = 'bytes'
+            
+        else:
+            # No range - return full file
+            def file_iterator(file_path, chunk_size=8192):
+                """Generator to read entire file in chunks"""
+                with open(file_path, 'rb') as f:
+                    while True:
+                        data = f.read(chunk_size)
+                        if not data:
+                            break
+                        yield data
+            
+            response = StreamingHttpResponse(
+                file_iterator(file_path),
+                content_type=content_type
+            )
+            response['Content-Length'] = str(file_size)
+            response['Accept-Ranges'] = 'bytes'
+
+        # Set additional headers
+        filename = os.path.basename(file_path)
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        
+        # CORS headers for development
+        response['Access-Control-Allow-Origin'] = '*'
+        response['Access-Control-Expose-Headers'] = 'Content-Length, Content-Range, Accept-Ranges'
+        response['Cross-Origin-Resource-Policy'] = 'cross-origin'
+        
+        # Caching headers
+        response['Cache-Control'] = 'public, max-age=3600'
+        
+        return response
+
+
+class VideoInfoView(APIView):
+    """Get video information without streaming"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, resource_id):
+        """
+        Get video metadata
+        URL: /api/video/info/<resource_id>/
+        """
+        if not request.user.has_perm('lesson_resources.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem thông tin video. Yêu cầu quyền: lesson_resources.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            resource = LessonResource.objects.select_related('lesson__course', 'file').get(
+                id=resource_id,
+                type='video'
+            )
+        except LessonResource.DoesNotExist:
+            return Response(
+                {"error": "Video resource not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if not resource.file or not resource.file.storage_key:
+            return Response(
+                {"error": "Video file not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        file_path = resource.file.storage_key.path
+        
+        if not os.path.exists(file_path):
+            return Response(
+                {"error": "Video file not found on disk"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Get file info
+        file_size = os.path.getsize(file_path)
+        content_type, _ = mimetypes.guess_type(file_path)
+        
+        return Response({
+            "id": resource.id,
+            "title": resource.title,
+            "filename": resource.file.filename,
+            "size": file_size,
+            "content_type": content_type,
+            "stream_url": f"/api/video/stream/{resource_id}/",
+        }, status=status.HTTP_200_OK)
 

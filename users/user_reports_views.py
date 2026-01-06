@@ -25,6 +25,12 @@ class UserReportsStatsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        if not request.user.has_perm('users.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem thống kê user. Yêu cầu quyền: users.read"},
+                status=http_status.HTTP_403_FORBIDDEN
+            )
+        
         # Lấy tháng từ query params, mặc định là tháng hiện tại
         month_str = request.query_params.get('month')
         
@@ -131,6 +137,12 @@ class UserReportsGrowthChartView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        if not request.user.has_perm('users.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem biểu đồ tăng trưởng user. Yêu cầu quyền: users.read"},
+                status=http_status.HTTP_403_FORBIDDEN
+            )
+        
         month_str = request.query_params.get('month')
         
         if month_str:
@@ -203,6 +215,12 @@ class UserReportsLevelDistributionView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        if not request.user.has_perm('users.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem phân bổ cấp độ user. Yêu cầu quyền: users.read"},
+                status=http_status.HTTP_403_FORBIDDEN
+            )
+        
         month_str = request.query_params.get('month')
         
         if month_str:
@@ -263,6 +281,12 @@ class UserReportsCourseEnrollmentsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        if not request.user.has_perm('enrollments.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem thống kê khóa học. Yêu cầu quyền: enrollments.read"},
+                status=http_status.HTTP_403_FORBIDDEN
+            )
+        
         month_str = request.query_params.get('month')
         
         if month_str:
@@ -322,6 +346,12 @@ class UserReportsContestStatsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        if not request.user.has_perm('contests.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem thống kê contest. Yêu cầu quyền: contests.read"},
+                status=http_status.HTTP_403_FORBIDDEN
+            )
+        
         month_str = request.query_params.get('month')
         
         if month_str:
@@ -380,6 +410,12 @@ class UserReportsTopUsersView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        if not request.user.has_perm('users.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem top users. Yêu cầu quyền: users.read"},
+                status=http_status.HTTP_403_FORBIDDEN
+            )
+        
         from course.models import Enrollment
         
         top_users = User.objects.filter(
@@ -416,6 +452,12 @@ class UserReportsAllUsersView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        if not request.user.has_perm('users.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách users. Yêu cầu quyền: users.read"},
+                status=http_status.HTTP_403_FORBIDDEN
+            )
+        
         # Pagination params
         page = int(request.query_params.get('page', 1))
         page_size = int(request.query_params.get('page_size', 10))

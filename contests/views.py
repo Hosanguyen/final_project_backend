@@ -26,6 +26,12 @@ class ContestCreateView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
+        if not request.user.has_perm('contests.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo contest. Yêu cầu quyền: contests.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         serializer = ContestCreateSerializer(data=request.data, context={'request': request})
         
         if not serializer.is_valid():
@@ -121,10 +127,39 @@ class ContestListView(APIView):
         if visibility_filter:
             contests = contests.filter(visibility=visibility_filter)
         
-        serializer = ContestListSerializer(contests, many=True)
+        # Search by title
+        search = request.query_params.get('search', None)
+        if search:
+            contests = contests.filter(title__icontains=search)
+        
+        # Order by
+        contests = contests.order_by('-created_at')
+        
+        # Pagination
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+        
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 10000:
+            page_size = 10
+        
+        total_count = contests.count()
+        paginator = Paginator(contests, page_size)
+        
+        try:
+            contests_page = paginator.page(page)
+        except EmptyPage:
+            contests_page = paginator.page(paginator.num_pages) if paginator.num_pages > 0 else []
+        
+        serializer = ContestListSerializer(contests_page, many=True)
         return Response({
             'contests': serializer.data,
-            'total': contests.count()
+            'total': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': paginator.num_pages
         }, status=status.HTTP_200_OK)
 
 
@@ -158,6 +193,12 @@ class ContestDetailView(APIView):
             }, status=status.HTTP_404_NOT_FOUND)
     
     def put(self, request, contest_id):
+        if not request.user.has_perm('contests.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật contest. Yêu cầu quyền: contests.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             contest = Contest.objects.get(id=contest_id)
             contest_mode_changed = False
@@ -189,6 +230,12 @@ class ContestDetailView(APIView):
             }, status=status.HTTP_404_NOT_FOUND)
     
     def delete(self, request, contest_id):
+        if not request.user.has_perm('contests.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa contest. Yêu cầu quyền: contests.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             contest = Contest.objects.get(id=contest_id)
             
@@ -219,6 +266,12 @@ class ContestProblemView(APIView):
     
     def post(self, request, contest_id):
         """Add a problem to the contest"""
+        if not request.user.has_perm('contest_problems.create'):
+            return Response(
+                {"detail": "Bạn không có quyền thêm problem vào contest. Yêu cầu quyền: contest_problems.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         from .serializers import AddProblemToContestSerializer
         from problems.models import Problem
         
@@ -328,6 +381,12 @@ class ContestProblemView(APIView):
     
     def delete(self, request, contest_id, problem_id):
         """Remove a problem from the contest"""
+        if not request.user.has_perm('contest_problems.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa problem khỏi contest. Yêu cầu quyền: contest_problems.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         from problems.models import Problem
         
         try:
@@ -395,7 +454,7 @@ class ContestDetailUserView(APIView):
             # Validate pagination parameters
             if page < 1:
                 page = 1
-            if page_size < 1 or page_size > 100:
+            if page_size < 1 or page_size > 10000:
                 page_size = 20
             
             # Get all contest problems
@@ -603,6 +662,12 @@ class ContestParticipantsView(APIView):
     
     def get(self, request, contest_id):
         """Get all participants for a contest"""
+        if not request.user.has_perm('contest_participants.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách người tham gia. Yêu cầu quyền: contest_participants.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             contest = Contest.objects.get(id=contest_id)
             
@@ -647,6 +712,12 @@ class ContestParticipantToggleView(APIView):
     
     def patch(self, request, contest_id, participant_id):
         """Deactivate active participant (Admin only can deactivate, not reactivate)"""
+        if not request.user.has_perm('contest_participants.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật người tham gia. Yêu cầu quyền: contest_participants.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             contest = Contest.objects.get(id=contest_id)
             participant = ContestParticipant.objects.get(
@@ -695,6 +766,12 @@ class ContestUserCandidatesView(APIView):
 
     def get(self, request, contest_id):
         from users.models import User
+        if not request.user.has_perm('contest_participants.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách người dùng. Yêu cầu quyền: contest_participants.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             contest = Contest.objects.get(id=contest_id)
         except Contest.DoesNotExist:
@@ -710,8 +787,8 @@ class ContestUserCandidatesView(APIView):
             page = 1
         if page_size < 1:
             page_size = 20
-        if page_size > 100:
-            page_size = 100
+        if page_size > 10000:
+            page_size = 10000
 
         queryset = User.objects.all()
 
@@ -776,6 +853,12 @@ class ContestParticipantsBulkAddView(APIView):
 
     def post(self, request, contest_id):
         from users.models import User
+        if not request.user.has_perm('contest_participants.create'):
+            return Response(
+                {"detail": "Bạn không có quyền thêm người tham gia. Yêu cầu quyền: contest_participants.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             contest = Contest.objects.get(id=contest_id)
         except Contest.DoesNotExist:
@@ -822,6 +905,12 @@ class ContestDetailStatisticsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, contest_id):
+        if not request.user.has_perm('contests.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem thống kê contest. Yêu cầu quyền: contests.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             # Get the contest
             contest = Contest.objects.filter(id=contest_id).first()
@@ -1058,6 +1147,12 @@ class ContestRegistrationView(APIView):
     
     def post(self, request, contest_id):
         """Register for a contest"""
+        if not request.user.has_perm('contest_participants.create'):
+            return Response(
+                {"detail": "Bạn không có quyền đăng ký contest. Yêu cầu quyền: contest_participants.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             contest = Contest.objects.get(id=contest_id, visibility='public')
             user = request.user
@@ -1108,6 +1203,12 @@ class ContestRegistrationView(APIView):
     
     def delete(self, request, contest_id):
         """Unregister from a contest"""
+        if not request.user.has_perm('contest_participants.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền hủy đăng ký contest. Yêu cầu quyền: contest_participants.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             contest = Contest.objects.get(id=contest_id, visibility='public')
             user = request.user
@@ -1157,6 +1258,12 @@ class ContestRegistrationStatusView(APIView):
     
     def get(self, request, contest_id):
         """Get registration status for current user"""
+        if not request.user.has_perm('contest_participants.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem trạng thái đăng ký. Yêu cầu quyền: contest_participants.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             contest = Contest.objects.get(id=contest_id, visibility='public')
             user = request.user
@@ -1195,6 +1302,12 @@ class ContestProblemDetailView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, contest_problem_id):
+        if not request.user.has_perm('contest_problems.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem chi tiết contest problem. Yêu cầu quyền: contest_problems.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             contest_problem = ContestProblem.objects.select_related(
                 'contest', 'problem'
@@ -1334,6 +1447,12 @@ class ContestRecalculateRankingsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, contest_id):
+        if not request.user.has_perm('contests.update'):
+            return Response(
+                {"detail": "Bạn không có quyền tính lại xếp hạng. Yêu cầu quyền: contests.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             # Ensure contest exists
             try:
@@ -1363,6 +1482,12 @@ class ContestStatisticsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if not request.user.has_perm('contests.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem thống kê contest. Yêu cầu quyền: contests.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         try:
             from django.db.models import Count, Sum, Avg, Q
             from django.utils import timezone

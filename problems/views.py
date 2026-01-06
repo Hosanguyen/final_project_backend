@@ -14,6 +14,8 @@ from .serializers import (
     TestCaseSerializer, TestCaseCreateSerializer
 )
 from .domjudge_service import DOMjudgeService
+from contests.domjudge_service import DOMjudgeContestService
+from contests.models import ContestProblem, Contest
 from common.authentication import CustomJWTAuthentication
 
 
@@ -30,6 +32,12 @@ class ProblemListCreateView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        if not request.user.has_perm('problems.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách problems. Yêu cầu quyền: problems.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         # ... existing GET code - KHÔNG THAY ĐỔI ...
         problems = Problem.objects.all()
         
@@ -79,6 +87,12 @@ class ProblemListCreateView(APIView):
         })
     
     def post(self, request):
+        if not request.user.has_perm('problems.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo problem. Yêu cầu quyền: problems.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         data = request.data.dict()  # ← Chuyển QueryDict → dict thường
         
         # Parse test_cases từ JSON string
@@ -133,6 +147,27 @@ class ProblemListCreateView(APIView):
                 problem.is_synced_to_domjudge = True
                 problem.last_synced_at = timezone.now()
                 problem.save()
+
+
+                contest = Contest.objects.filter(slug='practice').first()
+                max_sequence = ContestProblem.objects.filter(contest=contest).count()
+
+                domjudge_contest_service = DOMjudgeContestService()
+                if problem.is_public:
+                    contest_problem = ContestProblem.objects.create(
+                        contest=contest,
+                        problem=problem,
+                        alias=problem.slug,
+                        point=1,
+                        sequence=max_sequence,
+                        label=problem.slug,
+                        lazy_eval_results=False
+                    )
+                    domjudge_contest_service.add_problem_to_contest('practice', problem.slug, {
+                        'label': problem.slug,
+                        'lazy_eval_results': 0,
+                        'points': 1
+                    })
                 
                 sync_status = "synced"
                 sync_message = f"Synced to DOMjudge with ID: {domjudge_problem_id}"
@@ -164,12 +199,24 @@ class ProblemDetailView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, id):
+        if not request.user.has_perm('problems.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem chi tiết problem. Yêu cầu quyền: problems.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         # ... existing GET code - KHÔNG THAY ĐỔI ...
         problem = get_object_or_404(Problem, id=id)
         serializer = ProblemDetailSerializer(problem)
         return Response(serializer.data)
     
     def put(self, request, id):
+        if not request.user.has_perm('problems.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật problem. Yêu cầu quyền: problems.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         problem = get_object_or_404(Problem, id=id)
         data = request.data.dict()  # ← Chuyển QueryDict → dict thường
         
@@ -224,6 +271,40 @@ class ProblemDetailView(APIView):
                 sync_status = "sync_failed"
                 sync_message = str(e)
         
+        domjudge_contest_service = DOMjudgeContestService()
+        contest = Contest.objects.filter(slug='practice').first()
+        max_sequence = ContestProblem.objects.filter(contest=contest).count()
+
+        if problem.is_public:
+            try:
+                contest_problem, created = ContestProblem.objects.get_or_create(
+                    contest=contest,
+                    problem=problem,
+                    defaults={
+                        'alias': problem.slug,
+                        'point': 1,
+                        'sequence': max_sequence,
+                        'label': problem.slug,
+                        'lazy_eval_results': False
+                    }
+                )
+                if created:
+                    domjudge_contest_service.add_problem_to_contest('practice', problem.slug, {
+                        'label': problem.slug,
+                        'lazy_eval_results': 0,
+                        'points': 1
+                    })
+            except Exception as e:
+                print(f"Warning: Failed to add/update problem in practice contest: {str(e)}")
+        elif problem.is_public == False:
+            try:
+                contest_problem = ContestProblem.objects.get(contest=contest, problem=problem)
+                if contest_problem:
+                    contest_problem.delete()
+                    domjudge_contest_service.remove_problem_from_contest('practice', problem.slug)
+            except Exception as e:
+                print(f"Warning: Failed to remove problem from practice contest: {str(e)}")
+        
         detail_serializer = ProblemDetailSerializer(problem)
         
         return Response({
@@ -234,6 +315,11 @@ class ProblemDetailView(APIView):
         })
     
     def delete(self, request, id):
+        if not request.user.has_perm('problems.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa problem. Yêu cầu quyền: problems.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
         # ... existing DELETE code - KHÔNG THAY ĐỔI ...
         problem = get_object_or_404(Problem, id=id)
         
@@ -262,6 +348,12 @@ class ProblemTestCasesView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, problem_id):
+        if not request.user.has_perm('test_cases.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem test cases. Yêu cầu quyền: test_cases.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         problem = get_object_or_404(Problem, id=problem_id)
         test_cases = problem.test_cases.all()
         serializer = TestCaseSerializer(test_cases, many=True)
@@ -273,6 +365,12 @@ class ProblemTestCasesView(APIView):
         })
     
     def post(self, request, problem_id):
+        if not request.user.has_perm('test_cases.create'):
+            return Response(
+                {"detail": "Bạn không có quyền tạo test case. Yêu cầu quyền: test_cases.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         problem = get_object_or_404(Problem, id=problem_id)
         serializer = TestCaseCreateSerializer(data=request.data)
         
@@ -322,11 +420,23 @@ class TestCaseDetailView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, problem_id, testcase_id):
+        if not request.user.has_perm('test_cases.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem test case. Yêu cầu quyền: test_cases.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         test_case = get_object_or_404(TestCase, id=testcase_id, problem_id=problem_id)
         serializer = TestCaseSerializer(test_case)
         return Response(serializer.data)
     
     def put(self, request, problem_id, testcase_id):
+        if not request.user.has_perm('test_cases.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật test case. Yêu cầu quyền: test_cases.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         test_case = get_object_or_404(TestCase, id=testcase_id, problem_id=problem_id)
         serializer = TestCaseCreateSerializer(test_case, data=request.data, partial=True)
         
@@ -364,6 +474,12 @@ class TestCaseDetailView(APIView):
         })
     
     def delete(self, request, problem_id, testcase_id):
+        if not request.user.has_perm('test_cases.delete'):
+            return Response(
+                {"detail": "Bạn không có quyền xóa test case. Yêu cầu quyền: test_cases.delete"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         test_case = get_object_or_404(TestCase, id=testcase_id, problem_id=problem_id)
         problem = test_case.problem
         
@@ -391,6 +507,11 @@ class ProblemStatisticsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, id):
+        if not request.user.has_perm('problems.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem thống kê problem. Yêu cầu quyền: problems.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
         from contests.models import Contest, ContestProblem
         from django.db.models import Count, Avg, Max, Min
         from datetime import datetime, timedelta
@@ -487,6 +608,12 @@ class SubmissionCreateView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request, problem_id):
+        if not request.user.has_perm('submissions.create'):
+            return Response(
+                {"detail": "Bạn không có quyền submit code. Yêu cầu quyền: submissions.create"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         from .models import Submissions
         from course.models import Language
         from .serializers import SubmissionCreateSerializer, SubmissionSerializer
@@ -592,6 +719,12 @@ class SubmissionListView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, problem_id=None):
+        if not request.user.has_perm('submissions.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem submissions. Yêu cầu quyền: submissions.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         from .models import Submissions
         from .serializers import SubmissionListSerializer
         from contests.models import Contest
@@ -717,6 +850,12 @@ class SubmissionDetailView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, submission_id):
+        if not request.user.has_perm('submissions.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem submission. Yêu cầu quyền: submissions.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         from .models import Submissions
         from .serializers import SubmissionSerializer
         
@@ -805,7 +944,12 @@ class ProblemRecommendationView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        import pickle
+        if not request.user.has_perm('problems.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem gợi ý problems. Yêu cầu quyền: problems.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         import os
         from django.conf import settings
         
@@ -814,29 +958,17 @@ class ProblemRecommendationView(APIView):
             
             # Lấy tham số
             n_recommendations = int(request.query_params.get('limit', 10))
-            strategy = request.query_params.get('strategy', 'similar')  # similar or challenging
-            
-            if strategy not in ['similar', 'challenging']:
-                return Response({
-                    'error': 'Invalid strategy. Use "similar" or "challenging"'
-                }, status=status.HTTP_400_BAD_REQUEST)
             
             # Load model
-            model_path = os.path.join(settings.BASE_DIR, 'media', 'models', 'recommendation_model.pkl')
+            from common.recommender import ProductionRecommender
+            recommender = ProductionRecommender(model_path='recommendation_model.pkl')
             
-            if not os.path.exists(model_path):
+            # Load model từ file
+            if not recommender.load_model():
                 return Response({
                     'error': 'Recommendation model not found. Please train the model first.',
                     'hint': 'Run: python manage.py train_recommendation'
                 }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-            
-            with open(model_path, 'rb') as f:
-                model_data = pickle.load(f)
-            
-            # Khôi phục recommender
-            from common.recommender import ProductionRecommender
-            recommender = ProductionRecommender()
-            recommender.__dict__.update(model_data)
             
             # Lấy danh sách bài đã giải của user (AC only)
             solved_submissions = Submissions.objects.filter(
@@ -860,8 +992,7 @@ class ProblemRecommendationView(APIView):
                 user_id=user.id,
                 solved_ids=solved_ids,
                 valid_problem_ids_set=valid_problem_ids,
-                n_recommendations=n_recommendations,
-                strategy=strategy
+                n_recommendations=n_recommendations
             )
             
             # Nếu không có gợi ý (cold start hoặc đã giải hết)
@@ -872,24 +1003,32 @@ class ProblemRecommendationView(APIView):
                     is_synced_to_domjudge=True
                 ).exclude(id__in=solved_ids)[:n_recommendations]
                 
+                # Lấy trước contest_problem cho contest "practice"
+                contest_problem_map = {
+                    cp.problem_id: cp.id
+                    for cp in ContestProblem.objects
+                        .filter(contest__slug='practice', problem__in=unsolved_problems)
+                }
+
                 recommendations = [
                     {
                         'problem_id': p.id,
                         'title': p.title,
+                        'contest_problem_id': contest_problem_map.get(p.id),
                         'difficulty': p.difficulty,
                         'rating': p.rating,
-                        'tags': [tag.name for tag in p.tags.all()],
+                        'tags': list(p.tags.values_list('name', flat=True)),
                         'score': 0.0
                     }
                     for p in unsolved_problems
                 ]
+
             
             return Response({
                 'user_id': user.id,
                 'username': user.username,
                 'user_rating': user.current_rating,
                 'solved_count': len(solved_ids),
-                'strategy': strategy,
                 'recommendations': recommendations
             })
             

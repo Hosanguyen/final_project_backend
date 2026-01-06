@@ -15,7 +15,9 @@ import random
 import time
 from faker import Faker
 
+from contests.models import Contest, ContestProblem
 from problems.models import Problem, TestCase, Submissions, TagProblem
+from contests.domjudge_service import DOMjudgeContestService
 from course.models import Tag, Language
 from users.models import User, Role
 from problems.domjudge_service import DOMjudgeService
@@ -42,13 +44,11 @@ class DataFaker:
         """Tạo hoặc lấy Languages và Tags"""
         print("   -> Setting up Languages and Tags...")
         
-        # Ensure languages exist
+        # Ensure languages exist - Chỉ lấy các language có allow_submit=1 trong DOMjudge
         language_data = [
-            {'code': 'python', 'name': 'Python 3', 'externalid': 'python3', 'extension': '.py'},
-            {'code': 'java', 'name': 'Java', 'externalid': 'java', 'extension': '.java'},
-            {'code': 'cpp', 'name': 'C++', 'externalid': 'cpp', 'extension': '.cpp'},
             {'code': 'c', 'name': 'C', 'externalid': 'c', 'extension': '.c'},
-            {'code': 'javascript', 'name': 'JavaScript', 'externalid': 'javascript', 'extension': '.js'},
+            {'code': 'cpp', 'name': 'C++', 'externalid': 'cpp', 'extension': '.cpp'},
+            {'code': 'java', 'name': 'Java', 'externalid': 'java', 'extension': '.java'},
         ]
         
         for lang_data in language_data:
@@ -68,13 +68,13 @@ class DataFaker:
         
         print(f"      ✓ {len(self.languages)} languages, {len(self.tags)} tags ready")
     
-    def generate_users(self, count=100):
+    def generate_users(self, count=500):
         """Tạo fake users với rating phân bố thực tế"""
         print(f"\n[1/4] Generating {count} users...")
         
         # Đảm bảo có role Student
         student_role, _ = Role.objects.get_or_create(
-            name='Student',
+            name='user',
             defaults={'description': 'Student role', 'is_default': True}
         )
         
@@ -121,7 +121,8 @@ class DataFaker:
                     contests_participated=random.randint(0, 50),
                     total_problems_solved=0,  # Sẽ update sau khi tạo submissions
                     rating_volatility=max(50, 350 - random.randint(0, 100)),
-                    active=True
+                    active=True,
+                    email_verified=True,
                 )
                 
                 # Gán role
@@ -135,7 +136,7 @@ class DataFaker:
         print(f"   ✓ Created {len(created_users)} users")
         return created_users
     
-    def generate_problems(self, count=200, sync_to_domjudge=True):
+    def generate_problems(self, count=1000, sync_to_domjudge=True):
         """Tạo fake problems với test cases"""
         print(f"\n[2/4] Generating {count} problems...")
         
@@ -158,7 +159,7 @@ class DataFaker:
                 
                 # Tạo problem
                 problem = Problem.objects.create(
-                    slug=f"problem-{i+1:04d}",
+                    slug=f"p-{i+1:04d}",
                     title=f"Problem {i+1}: {self.fake.catch_phrase()}",
                     short_statement=self.fake.sentence(),
                     statement_text=self._generate_problem_statement(),
@@ -196,6 +197,25 @@ class DataFaker:
                         problem.is_synced_to_domjudge = True
                         problem.last_synced_at = timezone.now()
                         problem.save()
+                        contest = Contest.objects.filter(slug='practice').first()
+                        max_sequence = ContestProblem.objects.filter(contest=contest).count()
+
+                        domjudge_contest_service = DOMjudgeContestService()
+                        if problem.is_public:
+                            contest_problem = ContestProblem.objects.create(
+                                contest=contest,
+                                problem=problem,
+                                alias=problem.slug,
+                                point=1,
+                                sequence=max_sequence,
+                                label=problem.slug,
+                                lazy_eval_results=False
+                            )
+                            domjudge_contest_service.add_problem_to_contest('practice', problem.slug, {
+                                'label': problem.slug,
+                                'lazy_eval_results': 0,
+                                'points': 1
+                            })
                         print(f"      ✓ [{i+1}/{count}] {problem.slug} synced to DOMjudge: {domjudge_id}")
                     except Exception as e:
                         print(f"      ✗ [{i+1}/{count}] {problem.slug} sync failed: {str(e)}")
@@ -264,7 +284,7 @@ class DataFaker:
         result = random.randint(1, 100000)
         return str(result)
     
-    def generate_submissions(self, count=10000):
+    def generate_submissions(self, count=50000):
         """Tạo fake submissions"""
         print(f"\n[3/4] Generating {count} submissions...")
         
@@ -363,7 +383,7 @@ class DataFaker:
     
     def _generate_fake_code(self, language_code):
         """Tạo code giả"""
-        if language_code == 'python':
+        if language_code == 'python3':
             return """def solve():
     n = int(input())
     arr = list(map(int, input().split()))
@@ -388,7 +408,7 @@ public class Solution {
     }
 }
 """
-        else:
+        elif language_code == 'cpp':
             return """#include <iostream>
 using namespace std;
 
@@ -402,6 +422,22 @@ int main() {
         result += x;
     }
     cout << result << endl;
+    return 0;
+}
+"""
+        else:  # C
+            return """#include <stdio.h>
+
+int main() {
+    int n;
+    scanf("%d", &n);
+    int result = 0;
+    for (int i = 0; i < n; i++) {
+        int x;
+        scanf("%d", &x);
+        result += x;
+    }
+    printf("%d\\n", result);
     return 0;
 }
 """
@@ -430,19 +466,19 @@ class Command(BaseCommand):
         parser.add_argument(
             '--problems',
             type=int,
-            default=200,
+            default=1000,
             help='Số lượng problems cần tạo',
         )
         parser.add_argument(
             '--users',
             type=int,
-            default=100,
+            default=500,
             help='Số lượng users cần tạo',
         )
         parser.add_argument(
             '--submissions',
             type=int,
-            default=10000,
+            default=50000,
             help='Số lượng submissions cần tạo',
         )
         parser.add_argument(
@@ -467,7 +503,7 @@ class Command(BaseCommand):
         if options['clear_existing']:
             self.stdout.write(self.style.WARNING('\n⚠️  WARNING: This will DELETE ALL existing data!'))
             confirm = input('Type "yes" to continue: ')
-            if confirm.lower() != 'yes':
+            if confirm != 'y':
                 self.stdout.write(self.style.ERROR('Aborted.'))
                 return
             
