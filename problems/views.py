@@ -38,10 +38,8 @@ class ProblemListCreateView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # ... existing GET code - KHÔNG THAY ĐỔI ...
         problems = Problem.objects.all()
         
-        # Filters
         difficulty = request.query_params.get('difficulty')
         is_public = request.query_params.get('is_public')
         tag_id = request.query_params.get('tag_id')
@@ -63,11 +61,9 @@ class ProblemListCreateView(APIView):
                 Q(slug__icontains=search)
             )
         
-        # Ordering
         ordering = request.query_params.get('ordering', '-created_at')
         problems = problems.order_by(ordering)
         
-        # Pagination
         page = int(request.query_params.get('page', 1))
         page_size = int(request.query_params.get('page_size', 20))
         start = (page - 1) * page_size
@@ -93,47 +89,34 @@ class ProblemListCreateView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        data = request.data.dict()  # ← Chuyển QueryDict → dict thường
+        data = request.data.dict()
         
-        # Parse test_cases từ JSON string
         if 'test_cases' in data:
             try:
-                test_cases_json = data.pop('test_cases')  # ← XÓA và LẤY GIÁ TRỊ
-                data['test_cases'] = json.loads(test_cases_json)  # ← THÊM LẠI đã parse
+                test_cases_json = data.pop('test_cases')
+                data['test_cases'] = json.loads(test_cases_json)
             except json.JSONDecodeError as e:
                 return Response({
                     'test_cases': f'Invalid JSON: {str(e)}'
                 }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Parse tag_ids (có thể là multiple values)
         if 'tag_ids' in request.data:
             tag_ids = request.data.getlist('tag_ids')
             if tag_ids:
                 data['tag_ids'] = [int(x) for x in tag_ids if x]
         
-        # Parse language_ids (tương tự)
         if 'language_ids' in request.data:
             lang_ids = request.data.getlist('language_ids')
             if lang_ids:
                 data['language_ids'] = [int(x) for x in lang_ids if x]
-        
 
-        # if 'test_cases' in data:
-        #     try:
-        #         data['test_cases'] = json.loads(request.data['test_cases'])
-        #     except json.JSONDecodeError:
-        #         return Response({'test_cases': 'Invalid JSON'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        # return Response({"detail": request.data}, status=status.HTTP_400_BAD_REQUEST)
         serializer = ProblemCreateSerializer(data=data)
         
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
-        # Tạo problem (đã bao gồm test cases từ manual hoặc ZIP)
         problem = serializer.save(created_by=request.user)
         
-        # Auto sync to DOMjudge
         sync_status = "not_synced"
         sync_message = ""
         zip_process_result = None
@@ -205,7 +188,6 @@ class ProblemDetailView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # ... existing GET code - KHÔNG THAY ĐỔI ...
         problem = get_object_or_404(Problem, id=id)
         serializer = ProblemDetailSerializer(problem)
         return Response(serializer.data)
@@ -218,25 +200,22 @@ class ProblemDetailView(APIView):
             )
         
         problem = get_object_or_404(Problem, id=id)
-        data = request.data.dict()  # ← Chuyển QueryDict → dict thường
+        data = request.data.dict()
         
-        # Parse test_cases từ JSON string
         if 'test_cases' in data:
             try:
-                test_cases_json = data.pop('test_cases')  # ← XÓA và LẤY GIÁ TRỊ
-                data['test_cases'] = json.loads(test_cases_json)  # ← THÊM LẠI đã parse
+                test_cases_json = data.pop('test_cases')
+                data['test_cases'] = json.loads(test_cases_json)
             except json.JSONDecodeError as e:
                 return Response({
                     'test_cases': f'Invalid JSON: {str(e)}'
                 }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Parse tag_ids (có thể là multiple values)
         if 'tag_ids' in request.data:
             tag_ids = request.data.getlist('tag_ids')
             if tag_ids:
                 data['tag_ids'] = [int(x) for x in tag_ids if x]
         
-        # Parse language_ids (tương tự)
         if 'language_ids' in request.data:
             lang_ids = request.data.getlist('language_ids')
             if lang_ids:
@@ -247,10 +226,8 @@ class ProblemDetailView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
-        # Update problem (bao gồm cả test cases từ ZIP nếu có)
         problem = serializer.save(updated_by=request.user)
         
-        # Auto re-sync to DOMjudge
         sync_status = "not_synced"
         sync_message = ""
         
@@ -320,10 +297,8 @@ class ProblemDetailView(APIView):
                 {"detail": "Bạn không có quyền xóa problem. Yêu cầu quyền: problems.delete"},
                 status=status.HTTP_403_FORBIDDEN
             )
-        # ... existing DELETE code - KHÔNG THAY ĐỔI ...
         problem = get_object_or_404(Problem, id=id)
         
-        # Xóa từ DOMjudge trước
         if problem.is_synced_to_domjudge and problem.domjudge_problem_id:
             try:
                 domjudge_service = DOMjudgeService()
@@ -331,7 +306,6 @@ class ProblemDetailView(APIView):
             except Exception as e:
                 print(f"Warning: Failed to delete from DOMjudge: {str(e)}")
         
-        # Xóa từ Django
         problem.delete()
         
         return Response({
@@ -377,10 +351,8 @@ class ProblemTestCasesView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
-        # Tạo test case
         test_case = serializer.save(problem=problem)
         
-        # Auto sync to DOMjudge
         sync_status = "not_synced"
         sync_message = ""
         
@@ -443,11 +415,9 @@ class TestCaseDetailView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
-        # Update test case
         test_case = serializer.save()
         problem = test_case.problem
         
-        # Auto re-sync
         sync_status = "not_synced"
         sync_message = ""
         
@@ -483,10 +453,8 @@ class TestCaseDetailView(APIView):
         test_case = get_object_or_404(TestCase, id=testcase_id, problem_id=problem_id)
         problem = test_case.problem
         
-        # Xóa test case
         test_case.delete()
         
-        # Auto re-sync
         if problem.is_synced_to_domjudge and problem.test_cases.exists():
             try:
                 domjudge_service = DOMjudgeService()
@@ -519,29 +487,22 @@ class ProblemStatisticsView(APIView):
         problem = get_object_or_404(Problem, id=id)
         contest_id = request.query_params.get('contest_id')
         
-        # Base queryset for submissions
         submissions_qs = Submissions.objects.filter(problem=problem)
         
-        # Filter by contest if provided
         if contest_id:
             submissions_qs = submissions_qs.filter(contest_id=contest_id)
         
-        # Total submissions
         total_submissions = submissions_qs.count()
         
-        # Submissions by status
         by_status = list(submissions_qs.values('status')
                         .annotate(count=Count('id'))
                         .order_by('-count'))
         
-        # Accepted submissions
         accepted_submissions = submissions_qs.filter(status='correct').count()
         acceptance_rate = round((accepted_submissions / total_submissions * 100), 2) if total_submissions > 0 else 0
         
-        # Unique solvers
         unique_solvers = submissions_qs.filter(status='correct').values('user').distinct().count()
         
-        # Submissions over time (last 30 days)
         thirty_days_ago = timezone.now() - timedelta(days=30)
         submissions_by_date = submissions_qs.filter(
             submitted_at__gte=thirty_days_ago
@@ -551,7 +512,6 @@ class ProblemStatisticsView(APIView):
             count=Count('id')
         ).order_by('date')
         
-        # Top solvers (users with AC)
         top_solvers = list(
             submissions_qs.filter(status='correct')
             .values('user__username', 'user__full_name')
@@ -562,7 +522,6 @@ class ProblemStatisticsView(APIView):
             .order_by('-ac_count', 'first_ac')[:10]
         )
         
-        # Get contests this problem appears in (only if not filtering by specific contest)
         contests_list = []
         if not contest_id:
             contest_problems = ContestProblem.objects.filter(problem=problem).select_related('contest')
@@ -620,7 +579,6 @@ class SubmissionCreateView(APIView):
         
         problem = get_object_or_404(Problem, id=problem_id)
         
-        # Validate input
         serializer = SubmissionCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -629,26 +587,22 @@ class SubmissionCreateView(APIView):
         code = serializer.validated_data['code']
         contest_id = serializer.validated_data.get('contest_id')
         
-        # Kiểm tra language có được phép không
         language = get_object_or_404(Language, id=language_id)
         if problem.allowed_languages.exists() and language not in problem.allowed_languages.all():
             return Response({
                 "error": f"Ngôn ngữ {language.name} không được phép cho bài này"
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Kiểm tra problem đã sync với DOMjudge chưa
         if not problem.is_synced_to_domjudge or not problem.domjudge_problem_id:
             return Response({
                 "error": "Problem chưa được đồng bộ với DOMjudge"
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Lấy contest object nếu có
         contest = None
         if contest_id:
             from contests.models import Contest
             contest = get_object_or_404(Contest, id=contest_id)
         
-        # Tạo submission trong DB
         submission = Submissions.objects.create(
             problem=problem,
             user=request.user,
@@ -658,11 +612,10 @@ class SubmissionCreateView(APIView):
             status="pending"
         )
         
-        # Submit lên DOMjudge
         try:
             domjudge_service = DOMjudgeService()
-            contest_id = contest.slug or 'practice'  # Optional
-            team_id = request.data.get('team_id') or 'exteam'  # Optional
+            contest_id = contest.slug or 'practice'
+            team_id = request.data.get('team_id') or 'exteam'
             domjudge_response = domjudge_service.submit_code(
                 problem=problem,
                 language=language,
@@ -671,7 +624,6 @@ class SubmissionCreateView(APIView):
                 team_id=team_id
             )
             
-            # Lưu submission ID từ DOMjudge
             submission.domjudge_submission_id = domjudge_response.get('id') or domjudge_response.get('submitid')
             submission.status = "judging"
             submission.save()
@@ -685,16 +637,13 @@ class SubmissionCreateView(APIView):
             }, status=status.HTTP_201_CREATED)
         
         except Exception as e:
-            # Đánh dấu submission failed
             submission.status = "error"
             submission.feedback = str(e)
             submission.save()
             
-            # Parse error message to provide user-friendly feedback
             error_message = str(e)
             user_friendly_message = "Không thể kết nối đến hệ thống chấm bài. Vui lòng thử lại sau."
             
-            # Check for common error patterns
             if "Connection" in error_message or "connection" in error_message:
                 user_friendly_message = "Hệ thống chấm bài tạm thời không khả dụng. Vui lòng thử lại sau."
             elif "timeout" in error_message.lower():
@@ -733,36 +682,28 @@ class SubmissionListView(APIView):
             submissions = Submissions.objects.filter(problem_id=problem_id)
         else:
             submissions = Submissions.objects.all()
-        
-        # Filter by contest if provided
 
         contest_id = request.query_params.get('contest_id')
         if contest_id:
             submissions = submissions.filter(contest_id=contest_id)
         else:
-            # Nếu không truyền contest_id, lọc submissions có contest_id rỗng hoặc contest có slug là "practice"
             practice_contests = Contest.objects.filter(slug='practice').values_list('id', flat=True)
             submissions = submissions.filter(
                 Q(contest_id__isnull=True) | Q(contest_id__in=practice_contests)
             )
         
-        # Filter by user (chỉ xem submission của mình, trừ admin)
         if not request.user.is_staff:
             submissions = submissions.filter(user=request.user)
         
-        # Sync status from DOMjudge cho các submission đang judging
         sync_from_domjudge = request.query_params.get('sync', 'true').lower() == 'true'
         if sync_from_domjudge:
             self._sync_submissions_status(submissions)
         
-        # Ordering
         ordering = request.query_params.get('ordering', '-submitted_at')
         submissions = submissions.order_by(ordering)
         
-        # Kiểm tra xem tất cả submissions đã hoàn thành judging chưa (trước khi pagination)
         all_completed = not submissions.filter(status__in=['judging', 'pending']).exists()
         
-        # Pagination
         page = int(request.query_params.get('page', 1))
         page_size = int(request.query_params.get('page_size', 20))
         start = (page - 1) * page_size
@@ -779,28 +720,24 @@ class SubmissionListView(APIView):
             "page": page,
             "page_size": page_size,
             "total_pages": (total + page_size - 1) // page_size,
-            "all_completed": all_completed  # Flag để frontend biết khi nào dừng polling
+            "all_completed": all_completed
         })
     
     def _sync_submissions_status(self, submissions):
-        """Sync status từ DOMjudge cho các submission đang judging"""
         domjudge_service = DOMjudgeService()
-        contest_id = None  # Có thể lấy từ settings hoặc request params
+        contest_id = None
         
         for submission in submissions.filter(status='judging'):
             if submission.domjudge_submission_id:
                 try:
-                    # Lấy judgement từ DOMjudge
                     judgement = domjudge_service.get_judgement_summary(
                         submission.domjudge_submission_id
                     )
                     
                     if judgement and judgement.get('valid'):
-                        # Cập nhật status từ judgement_type_id
                         judgement_type = judgement.get('judgement_type_id', 'unknown')
                         submission.status = judgement_type.lower()
                         
-                        # Lấy chi tiết test cases để tính test_passed và test_total
                         try:
                             detailed_results = domjudge_service.get_detailed_judging_results(
                                 submission.domjudge_submission_id
@@ -816,17 +753,14 @@ class SubmissionListView(APIView):
                         except Exception as e:
                             print(f"Failed to get detailed results: {str(e)}")
                         
-                        # Cập nhật score (nếu AC thì 100, không thì 0)
                         if judgement_type == 'AC':
                             submission.score = 100.00
                         else:
                             submission.score = 0.00
                         
-                        # Cập nhật feedback
                         submission.feedback = f"Max run time: {judgement.get('max_run_time', 0)}s"
                         submission.save()
                         
-                        # Update contest ranking if submission is for a contest
                         if submission.contest:
                             from contests.ranking_service import ContestRankingService
                             try:
@@ -861,30 +795,25 @@ class SubmissionDetailView(APIView):
         
         submission = get_object_or_404(Submissions, id=submission_id)
         
-        # Check permission (chỉ xem submission của mình hoặc admin)
         if not request.user.is_staff and submission.user != request.user:
             return Response({
                 "error": "Bạn không có quyền xem submission này"
             }, status=status.HTTP_403_FORBIDDEN)
         
-        # Nếu submission đang judging, lấy kết quả mới nhất từ DOMjudge
         if submission.status == "judging" and submission.domjudge_submission_id:
             try:
                 domjudge_service = DOMjudgeService()
                 contest_id = request.query_params.get('contest_id')
                 
-                # Lấy judgement từ DOMjudge
                 judgement = domjudge_service.get_judgement(
                     submission.domjudge_submission_id,
                     contest_id=contest_id
                 )
                 
                 if judgement and judgement.get('valid'):
-                    # Cập nhật status từ judgement_type_id
                     judgement_type = judgement.get('judgement_type_id', 'unknown')
                     submission.status = judgement_type.lower()
                     
-                    # Lấy chi tiết test cases để tính test_passed và test_total
                     try:
                         detailed_results = domjudge_service.get_detailed_judging_results(
                             submission.domjudge_submission_id
@@ -900,13 +829,11 @@ class SubmissionDetailView(APIView):
                     except Exception as e:
                         print(f"Failed to get detailed results: {str(e)}")
                     
-                    # Cập nhật score
                     if judgement_type == 'AC':
                         submission.score = 100.00
                     else:
                         submission.score = 0.00
                     
-                    # Cập nhật feedback với chi tiết từ judgement
                     feedback_parts = [
                         f"Judgement: {judgement_type}",
                         f"Max run time: {judgement.get('max_run_time', 0)}s",
@@ -956,30 +883,25 @@ class ProblemRecommendationView(APIView):
         try:
             user = request.user
             
-            # Lấy tham số
             n_recommendations = int(request.query_params.get('limit', 10))
             
-            # Load model
             from common.recommender import ProductionRecommender
             recommender = ProductionRecommender(model_path='recommendation_model.pkl')
             
-            # Load model từ file
             if not recommender.load_model():
                 return Response({
                     'error': 'Recommendation model not found. Please train the model first.',
                     'hint': 'Run: python manage.py train_recommendation'
                 }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             
-            # Lấy danh sách bài đã giải của user (AC only)
             solved_submissions = Submissions.objects.filter(
                 user=user,
                 status='ac',
-                contest__isnull=True  # Practice mode only
+                contest__isnull=True
             ).values_list('problem_id', flat=True).distinct()
             
             solved_ids = list(solved_submissions)
             
-            # Lấy danh sách bài public và active
             valid_problem_ids = set(
                 Problem.objects.filter(
                     is_public=True,
@@ -987,7 +909,6 @@ class ProblemRecommendationView(APIView):
                 ).values_list('id', flat=True)
             )
             
-            # Gọi recommend
             recommendations = recommender.recommend(
                 user_id=user.id,
                 solved_ids=solved_ids,
@@ -995,15 +916,12 @@ class ProblemRecommendationView(APIView):
                 n_recommendations=n_recommendations
             )
             
-            # Nếu không có gợi ý (cold start hoặc đã giải hết)
             if not recommendations:
-                # Gợi ý random các bài chưa giải
                 unsolved_problems = Problem.objects.filter(
                     is_public=True,
                     is_synced_to_domjudge=True
                 ).exclude(id__in=solved_ids)[:n_recommendations]
                 
-                # Lấy trước contest_problem cho contest "practice"
                 contest_problem_map = {
                     cp.problem_id: cp.id
                     for cp in ContestProblem.objects

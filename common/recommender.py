@@ -41,7 +41,6 @@ class ProductionRecommender:
         self.model_path = model_path
 
     def recalculate_problem_ratings(self, problems_df, submissions_df):
-        
         print("[System] Đang tính lại Rating cho bài toán dựa trên user đã giải...")
         
         ac_subs = submissions_df[submissions_df['status'] == 'ac'].copy()
@@ -75,9 +74,6 @@ class ProductionRecommender:
         return problems_df
 
     def fit(self, problems_df, submissions_df):
-        """
-        Train model offline với dữ liệu từ database
-        """
         print(f"\n[Offline Training] Bắt đầu với {len(problems_df)} problems và {len(submissions_df)} submissions...")
         
         active_problems = problems_df[
@@ -100,40 +96,32 @@ class ProductionRecommender:
             print("   ⚠ Warning: Không có submissions!")
             return False
         
-        # Tính r_ui theo logic notebook: có trọng số theo số lần thử
         interaction_group = submissions_df.groupby(['user_id', 'problem_id']).agg(
             total_attempts=('status', 'count'),
             has_ac=('status', lambda x: (x == 'ac').any())
         ).reset_index()
         
-        # Công thức r_ui từ notebook
         def calculate_r_ui(row):
             if row['has_ac']: 
                 return 1.0
             else:
-                # Nếu chưa AC, tính điểm dựa trên sự cố gắng (max 0.8)
                 return min(0.1 * row['total_attempts'], 0.8)
         
         interaction_group['r_ui'] = interaction_group.apply(calculate_r_ui, axis=1)
         
-        # Kiểm tra có interactions không
         if interaction_group.empty:
             print("   ⚠ Warning: Không có interactions!")
             return False  
         
-        # Lấy tất cả user_id unique
         all_users = submissions_df['user_id'].unique()
         self.config['NUM_USERS'] = len(all_users)
         
-        # Map user_id -> index
         user_id_to_idx = {uid: idx for idx, uid in enumerate(all_users)}
         problem_id_to_idx = {pid: idx for idx, pid in enumerate(self.df_problems['problem_id'])}
         
-        # Tạo sparse matrix
         row_ind = [user_id_to_idx[uid] for uid in interaction_group['user_id']]
         col_ind = [problem_id_to_idx.get(pid, -1) for pid in interaction_group['problem_id']]
         
-        # Lọc ra các problem_id không hợp lệ
         valid_indices = [i for i, col in enumerate(col_ind) if col != -1]
         row_ind = [row_ind[i] for i in valid_indices]
         col_ind = [col_ind[i] for i in valid_indices]
@@ -150,31 +138,24 @@ class ProductionRecommender:
         print(f"   ✓ Interactions: {self.user_item_matrix.nnz:,}")
         print(f"   ✓ Time: {time.time() - t_start:.2f}s")
         
-        # Lưu mapping
         self.user_id_to_idx = user_id_to_idx
         self.problem_id_to_idx = problem_id_to_idx
         self.idx_to_user_id = {idx: uid for uid, idx in user_id_to_idx.items()}
         self.idx_to_problem_id = {idx: pid for pid, idx in problem_id_to_idx.items()}
         
-        # ============ 2. CONTENT-BASED (TAGS + RATING) ============
         print("\n[2/3] Training Content-Based Model (Tags + Rating)...")
         t_start = time.time()
         
-        # One-hot Tags
         self.mlb = MultiLabelBinarizer()
         tags_matrix = self.mlb.fit_transform(self.df_problems['tags'])
         
-        # Normalize Rating
         self.scaler = MinMaxScaler()
         rating_matrix = self.scaler.fit_transform(self.df_problems[['rating']])
         
-        # Tăng trọng số rating
         rating_weighted = np.repeat(rating_matrix, self.config['RATING_WEIGHT'], axis=1)
         
-        # Ghép features
         self.item_features = np.hstack([rating_weighted, tags_matrix])
         
-        # Train KNN
         n_samples = len(self.df_problems)
         effective_n = min(self.config['KNN_NEIGHBORS'], n_samples)
         
@@ -190,7 +171,6 @@ class ProductionRecommender:
         print(f"   ✓ Tags detected: {len(self.mlb.classes_)}")
         print(f"   ✓ Time: {time.time() - t_start:.2f}s")
         
-        # ============ 3. COLLABORATIVE FILTERING (IMPLICIT ALS) ============
         print("\n[3/3] Training Collaborative Filtering (ALS)...")
         t_start = time.time()
         
@@ -201,7 +181,6 @@ class ProductionRecommender:
             random_state=42
         )
         
-        # Apply confidence weighting
         ALPHA_VAL = 40
         data_conf = (self.user_item_matrix * ALPHA_VAL).astype('double')
         
@@ -212,8 +191,6 @@ class ProductionRecommender:
         print(f"   ✓ Item factors shape: {self.als_model.item_factors.shape}")
         print(f"   ✓ Time: {time.time() - t_start:.2f}s")
         
-        # Lưu user data để sử dụng trong recommend
-        # Extract user_elo từ submissions
         user_elos = submissions_df.groupby('user_id')['user_elo'].first()
         self.df_users = pd.DataFrame({
             'user_id': all_users,
@@ -223,37 +200,24 @@ class ProductionRecommender:
         return True
 
     def save_model(self):
-        """Lưu model xuống đĩa"""
         data = {
-            # Models
             'als_model': self.als_model,
             'knn_model': self.knn_model,
             'item_features': self.item_features,
             'user_item_matrix': self.user_item_matrix,
-            
-            # Preprocessing
             'mlb': self.mlb,
             'scaler': self.scaler,
-            
-            # Data
             'df_problems': self.df_problems,
             'df_users': self.df_users,
-            
-            # Mappings
             'user_id_to_idx': self.user_id_to_idx,
             'problem_id_to_idx': self.problem_id_to_idx,
             'idx_to_user_id': self.idx_to_user_id,
             'idx_to_problem_id': self.idx_to_problem_id,
-            
-            # Config
             'config': self.config,
-            
-            # Metadata
             'version': '2.0_improved',
             'description': 'Hybrid RS with Implicit ALS + Rating Matching Boost'
         }
         
-        # Lưu vào thư mục media
         from django.conf import settings
         model_dir = os.path.join(settings.BASE_DIR, 'media', 'models')
         os.makedirs(model_dir, exist_ok=True)
@@ -263,14 +227,13 @@ class ProductionRecommender:
         with open(model_path, 'wb') as f:
             pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
         
-        file_size = os.path.getsize(model_path) / (1024 * 1024)  # MB
+        file_size = os.path.getsize(model_path) / (1024 * 1024)
         print(f"\n[✓] Model đã lưu: {model_path}")
         print(f"    Size: {file_size:.2f} MB")
         
         return model_path
     
     def load_model(self):
-        """Load model từ đĩa"""
         from django.conf import settings
         model_dir = os.path.join(settings.BASE_DIR, 'media', 'models')
         model_path = os.path.join(model_dir, self.model_path)
@@ -282,27 +245,22 @@ class ProductionRecommender:
         with open(model_path, 'rb') as f:
             data = pickle.load(f)
         
-        # Load models
         self.als_model = data['als_model']
         self.knn_model = data['knn_model']
         self.item_features = data['item_features']
         self.user_item_matrix = data['user_item_matrix']
         
-        # Load preprocessing
         self.mlb = data['mlb']
         self.scaler = data['scaler']
         
-        # Load data
         self.df_problems = data['df_problems']
         self.df_users = data['df_users']
         
-        # Load mappings
         self.user_id_to_idx = data['user_id_to_idx']
         self.problem_id_to_idx = data['problem_id_to_idx']
         self.idx_to_user_id = data['idx_to_user_id']
         self.idx_to_problem_id = data['idx_to_problem_id']
         
-        # Load config
         self.config = data['config']
         
         print(f"[✓] Model loaded: {model_path}")
@@ -311,66 +269,44 @@ class ProductionRecommender:
         return True
 
     def recommend(self, user_id, solved_ids, valid_problem_ids_set, n_recommendations=5):
-        """
-        Tạo gợi ý cho user với Rating Matching Boost (theo notebook)
-        
-        Args:
-            user_id: ID của user
-            solved_ids: List các problem_id đã giải
-            valid_problem_ids_set: Set các problem_id hợp lệ (public, active)
-            n_recommendations: Số lượng gợi ý
-        
-        Returns:
-            List of recommended problems
-        """
         if self.df_problems is None or self.als_model is None:
             return []
         
-        # Lấy user index
         if user_id not in self.user_id_to_idx:
-            # Cold start: User mới
             return self._cold_start_recommend(n_recommendations)
         
         user_idx = self.user_id_to_idx[user_id]
         
-        # Lấy history indices
         user_history_idx = self.user_item_matrix[user_idx].indices
         
-        # Cold start: User chưa giải bài nào
         if len(user_history_idx) == 0:
             return self._cold_start_recommend(n_recommendations)
         
-        # Lấy Elo của user
         user_elo = self.df_users[self.df_users['user_id'] == user_id]['elo'].values
         if len(user_elo) == 0:
             user_elo = 1500
         else:
             user_elo = user_elo[0]
         
-        # Config
         NUM_PROBLEMS = self.config['NUM_PROBLEMS']
         HYBRID_ALPHA = self.config['HYBRID_ALPHA']
         KNN_NEIGHBORS = self.config['KNN_NEIGHBORS']
         rating_boost_weight = self.config['BEST_RATING_BOOST_WEIGHT']
         
-        # Exclude items
         exclude_items = set()
         for pid in solved_ids:
             if pid in self.problem_id_to_idx:
                 exclude_items.add(self.problem_id_to_idx[pid])
         
-        # ============ A. CF SCORE (ALS) ============
         u_vec = self.als_model.user_factors[user_idx]
         i_mat = self.als_model.item_factors
         cf_raw = np.dot(i_mat, u_vec)
         
-        # Normalize
         if cf_raw.max() > cf_raw.min():
             cf_norm = (cf_raw - cf_raw.min()) / (cf_raw.max() - cf_raw.min())
         else:
             cf_norm = np.zeros_like(cf_raw)
         
-        # ============ B. CB SCORE (KNN) ============
         cb_raw = np.zeros(NUM_PROBLEMS)
         
         if len(user_history_idx) > 0:
@@ -395,56 +331,41 @@ class ProductionRecommender:
                 out=np.zeros_like(neighbor_sims),
                 where=neighbor_counts > 0
             )
-        
-        # Normalize
+
         if cb_raw.max() > 0:
             cb_norm = cb_raw / cb_raw.max()
         else:
             cb_norm = np.zeros_like(cb_raw)
-        
-        # ============ C. RATING MATCHING BOOST (THEO NOTEBOOK) ============
+
         problem_ratings = self.df_problems['rating'].values
         rating_diff = problem_ratings - user_elo
         rating_boost = np.zeros(NUM_PROBLEMS)
-        
-        # Công thức duy nhất từ notebook - không có strategy
+
         for i in range(NUM_PROBLEMS):
             diff = rating_diff[i]
-            
+
             if diff < -100:
-                # Bài quá dễ: Penalty mạnh
                 rating_boost[i] = max(0, 1 - abs(diff) / 500)
             elif -100 <= diff <= 50:
-                # Bài tương đương: Boost cao nhất
                 rating_boost[i] = 1.0
             elif 50 < diff <= 200:
-                # Bài thử thách vừa phải: Boost cao
                 rating_boost[i] = 0.9 - (diff - 50) / 300
             elif 200 < diff <= 400:
-                # Bài khó: Boost trung bình
                 rating_boost[i] = 0.6 - (diff - 200) / 400
             else:
-                # Bài quá khó: Boost thấp
                 rating_boost[i] = max(0.2, 0.4 - (diff - 400) / 1000)
         
-        # ============ D. FINAL SCORE ============
         hybrid_base = HYBRID_ALPHA * cf_norm + (1 - HYBRID_ALPHA) * cb_norm
         final_scores = (1 - rating_boost_weight) * hybrid_base + rating_boost_weight * rating_boost
-        
-        # Loại trừ solved items
+
         for item_idx in exclude_items:
             final_scores[item_idx] = -1.0
-        
-        # Lọc theo valid_problem_ids_set
+
         for i in range(NUM_PROBLEMS):
             prob_id = self.idx_to_problem_id[i]
             if prob_id not in valid_problem_ids_set:
                 final_scores[i] = -1.0
-        
-        # Top K
-        top_indices = np.argsort(final_scores)[::-1][:n_recommendations]
-        
-        # Format output
+
         results = []
         for idx in top_indices:
             if final_scores[idx] < 0:
@@ -452,8 +373,7 @@ class ProductionRecommender:
             
             prob_id = self.idx_to_problem_id[idx]
             prob_info = self.df_problems[self.df_problems['problem_id'] == prob_id].iloc[0]
-            
-            # Thêm random factor nhỏ để tạo diversity
+
             diversity_factor = 1 + (np.random.random() * 0.05)
 
             contest = Contest.objects.get(slug="practice")
@@ -475,13 +395,9 @@ class ProductionRecommender:
         return results
     
     def _cold_start_recommend(self, n_recommendations):
-        """
-        Gợi ý cho user mới (cold start)
-        """
         if self.df_problems is None or len(self.df_problems) == 0:
             return []
-        
-        # Gợi ý các bài Easy phổ biến
+
         easy_problems = self.df_problems[
             self.df_problems['difficulty'] == 'easy'
         ].sort_values('rating').head(n_recommendations)
