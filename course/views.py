@@ -199,7 +199,7 @@ class CourseView(APIView):
         except EmptyPage:
             courses_page = paginator.page(paginator.num_pages) if paginator.num_pages > 0 else []
         
-        serializer = CourseSerializer(courses_page, many=True)
+        serializer = CourseSerializer(courses_page, many=True, context={'request': request})
         return Response({
             'results': serializer.data,
             'total': total_count,

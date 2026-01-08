@@ -38,6 +38,7 @@ class CourseSerializer(serializers.ModelSerializer):
     updated_by_name = serializers.CharField(source='updated_by.username', read_only=True)
     lessons_count = serializers.SerializerMethodField()
     enrollments_count = serializers.SerializerMethodField()
+    is_enrolled = serializers.SerializerMethodField()
     
     class Meta:
         model = Course
@@ -46,7 +47,7 @@ class CourseSerializer(serializers.ModelSerializer):
             'banner', 'banner_url', 'languages', 'tags', 'level', 'price', 'is_published', 
             'published_at', 'created_by', 'created_by_name', 'created_by_full_name',
             'created_at', 'updated_at', 'updated_by', 'updated_by_name', 'language_ids',
-            'tag_ids', 'lessons_count', 'enrollments_count'
+            'tag_ids', 'lessons_count', 'enrollments_count', 'is_enrolled'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'published_at']
     
@@ -60,6 +61,13 @@ class CourseSerializer(serializers.ModelSerializer):
         if obj.created_by:
             return obj.created_by.full_name or obj.created_by.username
         return None
+    
+    def get_is_enrolled(self, obj):
+        """Kiểm tra user hiện tại đã đăng ký khóa học chưa"""
+        request = self.context.get('request')
+        if request and hasattr(request, 'user') and request.user.is_authenticated:
+            return Enrollment.objects.filter(user=request.user, course=obj).exists()
+        return False
     
     def create(self, validated_data):
         language_ids = validated_data.pop('language_ids', [])
