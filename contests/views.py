@@ -4,8 +4,9 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.utils import timezone
 from datetime import timedelta
-from django.db.models import Q, Count, Sum, Avg
+from django.db.models import Q, Count, Sum, Avg, Prefetch
 from django.core.paginator import Paginator, EmptyPage
+from django.core.cache import cache
 
 from .models import Contest, ContestProblem, ContestParticipant
 from .serializers import (
@@ -450,6 +451,7 @@ class ContestDetailUserView(APIView):
             # Get pagination parameters
             page = int(request.query_params.get('page', 1))
             page_size = int(request.query_params.get('page_size', 20))
+            search_query = request.query_params.get('search', '').strip()
             
             # Validate pagination parameters
             if page < 1:
@@ -457,8 +459,17 @@ class ContestDetailUserView(APIView):
             if page_size < 1 or page_size > 10000:
                 page_size = 20
             
-            # Get all contest problems
-            contest_problems = ContestProblem.objects.filter(contest=contest).order_by('sequence')
+            # Get all contest problems with search filtering
+            contest_problems = ContestProblem.objects.filter(contest=contest).select_related('problem')
+            
+            # Apply search filter if query provided
+            if search_query:
+                contest_problems = contest_problems.filter(
+                    Q(problem__title__icontains=search_query) |
+                    Q(problem__slug__icontains=search_query)
+                )
+            
+            contest_problems = contest_problems.order_by('sequence')
             total_count = contest_problems.count()
             
             # Calculate pagination
@@ -1345,6 +1356,13 @@ class ContestLeaderboardView(APIView):
         try:
             contest = Contest.objects.get(id=contest_id)
             
+            # Check cache for practice contest (since it changes less frequently)
+            cache_key = f"practice_leaderboard_{contest_id}"
+            if contest.slug == 'practice':
+                cached_data = cache.get(cache_key)
+                if cached_data:
+                    return Response(cached_data, status=status.HTTP_200_OK)
+            
             # Get contest problems for column headers
             contest_problems = ContestProblem.objects.filter(
                 contest=contest
@@ -1360,17 +1378,34 @@ class ContestLeaderboardView(APIView):
                 'rgb': cp.rgb or ''
             } for cp in contest_problems]
             
-            # Get rankings
+            # Get rankings - limit to top 100 for practice contest
             participants = ContestRankingService.get_contest_leaderboard(contest_id)
+            if contest.slug == 'practice':
+                participants = participants[:100]  # Limit to top 100 for performance
             
             # Build leaderboard entries
             leaderboard_data = []
             current_rank = 1
             
+            # Batch query for attempted counts if practice contest
+            attempted_counts = {}
+            if contest.slug == 'practice' and participants:
+                user_ids = [p.user.id for p in participants]
+                # Single query to get attempted counts for all users
+                attempted_query = Submissions.objects.filter(
+                    contest=contest,
+                    user_id__in=user_ids,
+                    submitted_at__gte=contest.start_at,
+                    submitted_at__lte=contest.end_at
+                ).values('user_id').annotate(
+                    attempted_count=Count('problem', distinct=True)
+                )
+                attempted_counts = {item['user_id']: item['attempted_count'] for item in attempted_query}
+            
             for idx, participant in enumerate(participants, start=1):
-                # Get problem details for this user (for ICPC mode)
+                # Get problem details for this user (only for ICPC mode, skip for practice)
                 problem_details = {}
-                if contest.contest_mode == 'ICPC' or contest.slug == 'practice':
+                if contest.contest_mode == 'ICPC' and contest.slug != 'practice':
                     problem_details = ContestRankingService.get_user_problem_details(
                         contest_id,
                         participant.user.id
@@ -1384,20 +1419,8 @@ class ContestLeaderboardView(APIView):
                 if participant.user.avatar_url:
                     avatar_url = participant.user.avatar_url.url if hasattr(participant.user.avatar_url, 'url') else str(participant.user.avatar_url)
                 
-                # Attempted problems (distinct problems with any submission)
-                attempted_count = None
-                try:
-                    # Only compute for practice to avoid heavy queries elsewhere
-                    if contest.slug == 'practice':
-                        # Count distinct problems the user has ever submitted within the window
-                        attempted_count = Submissions.objects.filter(
-                            contest=contest,
-                            user=participant.user,
-                            submitted_at__gte=contest.start_at,
-                            submitted_at__lte=contest.end_at
-                        ).values('problem').distinct().count()
-                except Exception:
-                    attempted_count = None
+                # Get attempted count from batch query
+                attempted_count = attempted_counts.get(participant.user.id, 0) if contest.slug == 'practice' else None
 
                 entry = {
                     'rank': current_rank,
@@ -1417,7 +1440,7 @@ class ContestLeaderboardView(APIView):
                 leaderboard_data.append(entry)
                 current_rank += 1
             
-            return Response({
+            response_data = {
                 'contest_id': contest.id,
                 'contest_slug': contest.slug,
                 'contest_title': contest.title,
@@ -1426,7 +1449,13 @@ class ContestLeaderboardView(APIView):
                 'problems': problem_list,
                 'leaderboard': leaderboard_data,
                 'total_participants': len(leaderboard_data)
-            }, status=status.HTTP_200_OK)
+            }
+            
+            # Cache practice contest leaderboard for 5 minutes
+            if contest.slug == 'practice':
+                cache.set(cache_key, response_data, 300)  # 5 minutes cache
+            
+            return Response(response_data, status=status.HTTP_200_OK)
             
         except Contest.DoesNotExist:
             return Response({
