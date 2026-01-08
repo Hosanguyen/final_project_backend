@@ -117,7 +117,7 @@ class ProblemDetailSerializer(serializers.ModelSerializer):
             "id", "slug", "title", "short_statement", "statement_text",
             "input_format", "output_format", "difficulty",
             "time_limit_ms", "memory_limit_kb", "source", "is_public",
-            "validation_type", "custom_validator",
+            "validation_type", "validator_language", "custom_validator",
             "editorial_text", "editorial_file",
             "domjudge_problem_id", "is_synced_to_domjudge", "last_synced_at",
             "tags", "allowed_languages", "test_cases",
@@ -185,7 +185,7 @@ class ProblemCreateSerializer(serializers.ModelSerializer):
             "slug", "title", "short_statement", "statement_text",
             "input_format", "output_format", "difficulty",
             "time_limit_ms", "memory_limit_kb", "source", "is_public",
-            "validation_type", "custom_validator",
+            "validation_type", "validator_language", "custom_validator",
             "editorial_text", "editorial_file",
             "tag_ids", "language_ids", 
             # Manual mode
@@ -353,7 +353,7 @@ class ProblemUpdateSerializer(serializers.ModelSerializer):
             "title", "short_statement", "statement_text",
             "input_format", "output_format", "difficulty",
             "time_limit_ms", "memory_limit_kb", "source", "is_public",
-            "validation_type", "custom_validator",
+            "validation_type", "validator_language", "custom_validator",
             "editorial_text", "editorial_file",
             "tag_ids", "language_ids",
             # Manual mode

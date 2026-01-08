@@ -160,23 +160,130 @@ class DOMjudgeService:
             
             # 4. Add custom validator if validation_type is 'custom'
             if problem.validation_type == 'custom' and problem.custom_validator:
-                # Create output_validators directory with validator script
+                val_lang = getattr(problem, 'validator_language', 'python').lower()
+                base_path = 'output_validators/validator'
                 validator_content = problem.custom_validator
-                zip_file.writestr('output_validators/validator/validator.py', validator_content)
                 
-                # Add build script for Python validator
-                build_script = "#!/bin/sh\n# Python validator - no build needed\nexit 0\n"
-                zip_file.writestr('output_validators/validator/build', build_script)
-                
-                # Add run script for Python validator
-                # Use absolute path relative to script location
-                run_script = """#!/bin/sh
+                # Create validator based on language
+                if val_lang == 'python':
+                    # Python validator
+                    zip_file.writestr(f'{base_path}/validator.py', validator_content)
+                    
+                    build_script = "#!/bin/sh\n# Python validator - no build needed\nexit 0\n"
+                    zip_file.writestr(f'{base_path}/build', build_script)
+                    
+                    run_script = """#!/bin/sh
 # Get the directory where this script is located
 DIR="$(cd "$(dirname "$0")" && pwd)"
 # Run the validator with Python3
 exec python3 "$DIR/validator.py" "$@"
 """
-                zip_file.writestr('output_validators/validator/run', run_script)
+                    zip_file.writestr(f'{base_path}/run', run_script)
+                
+                elif val_lang == 'cpp':
+                    # C++ validator
+                    zip_file.writestr(f'{base_path}/validator.cpp', validator_content)
+                    
+                    build_script = """#!/bin/sh
+# Get the directory where this script is located
+DIR="$(cd "$(dirname "$0")" && pwd)"
+# Compile C++ validator
+g++ -O3 -o "$DIR/validator" "$DIR/validator.cpp"
+"""
+                    zip_file.writestr(f'{base_path}/build', build_script)
+                    
+                    run_script = """#!/bin/sh
+# Get the directory where this script is located
+DIR="$(cd "$(dirname "$0")" && pwd)"
+# Run the compiled validator
+exec "$DIR/validator" "$@"
+"""
+                    zip_file.writestr(f'{base_path}/run', run_script)
+                
+                elif val_lang == 'java':
+                    # Java validator (class name must be Validator)
+                    zip_file.writestr(f'{base_path}/Validator.java', validator_content)
+                    
+                    build_script = """#!/bin/sh
+# Get the directory where this script is located
+DIR="$(cd "$(dirname "$0")" && pwd)"
+# Compile Java validator
+javac -d "$DIR" "$DIR/Validator.java"
+"""
+                    zip_file.writestr(f'{base_path}/build', build_script)
+                    
+                    run_script = """#!/bin/sh
+# Get the directory where this script is located
+DIR="$(cd "$(dirname "$0")" && pwd)"
+# Run the Java validator
+exec java -cp "$DIR" Validator "$@"
+"""
+                    zip_file.writestr(f'{base_path}/run', run_script)
+                
+                elif val_lang == 'bash':
+                    # Bash validator
+                    zip_file.writestr(f'{base_path}/validator.sh', validator_content)
+                    
+                    build_script = "#!/bin/sh\n# Bash validator - no build needed\nexit 0\n"
+                    zip_file.writestr(f'{base_path}/build', build_script)
+                    
+                    run_script = """#!/bin/sh
+# Get the directory where this script is located
+DIR="$(cd "$(dirname "$0")" && pwd)"
+# Run the bash validator
+exec bash "$DIR/validator.sh" "$@"
+"""
+                    zip_file.writestr(f'{base_path}/run', run_script)
+                
+                elif val_lang == 'node':
+                    # Node.js validator
+                    zip_file.writestr(f'{base_path}/validator.js', validator_content)
+                    
+                    build_script = "#!/bin/sh\n# Node.js validator - no build needed\nexit 0\n"
+                    zip_file.writestr(f'{base_path}/build', build_script)
+                    
+                    run_script = """#!/bin/sh
+# Get the directory where this script is located
+DIR="$(cd "$(dirname "$0")" && pwd)"
+# Run the Node.js validator
+exec node "$DIR/validator.js" "$@"
+"""
+                    zip_file.writestr(f'{base_path}/run', run_script)
+                
+                elif val_lang == 'pascal':
+                    # Pascal validator
+                    zip_file.writestr(f'{base_path}/validator.pas', validator_content)
+                    
+                    build_script = """#!/bin/sh
+# Get the directory where this script is located
+DIR="$(cd "$(dirname "$0")" && pwd)"
+# Compile Pascal validator
+fpc -O2 -o"$DIR/validator" "$DIR/validator.pas"
+"""
+                    zip_file.writestr(f'{base_path}/build', build_script)
+                    
+                    run_script = """#!/bin/sh
+# Get the directory where this script is located
+DIR="$(cd "$(dirname "$0")" && pwd)"
+# Run the compiled validator
+exec "$DIR/validator" "$@"
+"""
+                    zip_file.writestr(f'{base_path}/run', run_script)
+                
+                else:
+                    # Default to Python if unknown language
+                    zip_file.writestr(f'{base_path}/validator.py', validator_content)
+                    
+                    build_script = "#!/bin/sh\n# Python validator - no build needed\nexit 0\n"
+                    zip_file.writestr(f'{base_path}/build', build_script)
+                    
+                    run_script = """#!/bin/sh
+# Get the directory where this script is located
+DIR="$(cd "$(dirname "$0")" && pwd)"
+# Run the validator with Python3
+exec python3 "$DIR/validator.py" "$@"
+"""
+                    zip_file.writestr(f'{base_path}/run', run_script)
             
             # 5. Add test cases
             sample_count = 1
