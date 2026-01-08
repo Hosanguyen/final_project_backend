@@ -251,18 +251,42 @@ class RatingService:
     @staticmethod
     def get_user_rating_info(user_id):
         """
-        Lấy thông tin rating của user
+        Lấy thông tin rating của user với global rank
         
         Args:
             user_id: ID của user
             
         Returns:
-            User object hoặc None
+            User object với global_rank attribute hoặc None
         """
         from users.models import User
+        from django.db import connection
+        from django.core.cache import cache
         
         try:
-            return User.objects.get(id=user_id)
+            user = User.objects.get(id=user_id)
+            
+            # Cache key cho global rank của user này
+            cache_key = f"user_global_rank_{user_id}_{user.current_rating}"
+            global_rank = cache.get(cache_key)
+            
+            if global_rank is None:
+                # Tối ưu query để tính global rank nhanh hơn  
+                # Dùng raw SQL để tính rank hiệu quả hơn
+                with connection.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT COUNT(*) + 1 as global_rank
+                        FROM users 
+                        WHERE current_rating > %s
+                    """, [user.current_rating])
+                    result = cursor.fetchone()
+                    global_rank = result[0] if result else 1
+                    
+                    # Cache trong 5 phút
+                    cache.set(cache_key, global_rank, 300)
+            
+            user.global_rank = global_rank
+            return user
         except User.DoesNotExist:
             return None
     

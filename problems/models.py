@@ -55,10 +55,26 @@ class Problem(models.Model):
         default="default",
         help_text="Validation method: 'default' for exact match, 'custom' for custom validator"
     )
+    
+    VALIDATOR_LANGUAGE_CHOICES = [
+        ("python", "Python"),
+        ("cpp", "C++"),
+        ("java", "Java"),
+        ("bash", "Bash"),
+        ("node", "Node.js"),
+        ("pascal", "Pascal"),
+    ]
+    validator_language = models.CharField(
+        max_length=20,
+        choices=VALIDATOR_LANGUAGE_CHOICES,
+        default="python",
+        help_text="Programming language for custom validator - only used when validation_type='custom'"
+    )
+    
     custom_validator = models.TextField(
         null=True, 
         blank=True,
-        help_text="Custom validator code (Python script) - only used when validation_type='custom'"
+        help_text="Custom validator code - only used when validation_type='custom'"
     )
     
     # Editorial

@@ -371,23 +371,28 @@ class RemoveRolesFromUserSerializer(serializers.Serializer):
 class UserRatingSerializer(serializers.ModelSerializer):
     """Serializer cho User rating information"""
     rank_color = serializers.SerializerMethodField()
+    global_rank = serializers.SerializerMethodField()
     
     class Meta:
         model = User
         fields = [
             'id', 'username', 'full_name', 'avatar_url',
             'current_rating', 'max_rating', 'rank', 'max_rank', 'rank_color',
-            'contests_participated', 'contests_won', 'total_problems_solved',
+            'global_rank', 'contests_participated', 'contests_won', 'total_problems_solved',
             'last_contest_at'
         ]
         read_only_fields = [
             'id', 'current_rating', 'max_rating', 'rank', 'max_rank',
-            'contests_participated', 'contests_won', 'total_problems_solved',
+            'global_rank', 'contests_participated', 'contests_won', 'total_problems_solved',
             'last_contest_at'
         ]
     
     def get_rank_color(self, obj):
         return User.get_rank_color(obj.rank)
+    
+    def get_global_rank(self, obj):
+        """Lấy global rank từ attribute được set trong RatingService"""
+        return getattr(obj, 'global_rank', None)
 
 
 class UserRatingSimpleSerializer(serializers.ModelSerializer):
