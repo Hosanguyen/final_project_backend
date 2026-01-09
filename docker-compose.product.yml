@@ -182,7 +182,7 @@ services:
   # ==========================================
   frontend:
     build:
-      context: ../frontend
+      context: ../final_project_frontend
       dockerfile: Dockerfile
       args:
         - REACT_APP_API_URL=
