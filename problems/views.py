@@ -534,12 +534,12 @@ class ProblemStatisticsView(APIView):
                         .annotate(count=Count('id'))
                         .order_by('-count'))
         
-        # Accepted submissions
-        accepted_submissions = submissions_qs.filter(status='correct').count()
+        # Accepted submissions - use status__in to handle multiple accepted status values
+        accepted_submissions = submissions_qs.filter(status__in=['AC', 'ac', 'correct', 'Correct', 'accepted']).count()
         acceptance_rate = round((accepted_submissions / total_submissions * 100), 2) if total_submissions > 0 else 0
         
         # Unique solvers
-        unique_solvers = submissions_qs.filter(status='correct').values('user').distinct().count()
+        unique_solvers = submissions_qs.filter(status__in=['AC', 'ac', 'correct', 'Correct', 'accepted']).values('user').distinct().count()
         
         # Submissions over time (last 30 days)
         thirty_days_ago = timezone.now() - timedelta(days=30)
@@ -553,7 +553,7 @@ class ProblemStatisticsView(APIView):
         
         # Top solvers (users with AC)
         top_solvers = list(
-            submissions_qs.filter(status='correct')
+            submissions_qs.filter(status__in=['AC', 'ac', 'correct', 'Correct', 'accepted'])
             .values('user__username', 'user__full_name')
             .annotate(
                 ac_count=Count('id'),
@@ -568,7 +568,7 @@ class ProblemStatisticsView(APIView):
             contest_problems = ContestProblem.objects.filter(problem=problem).select_related('contest')
             for cp in contest_problems:
                 contest_submissions = Submissions.objects.filter(problem=problem, contest=cp.contest)
-                contest_ac = contest_submissions.filter(status='correct').count()
+                contest_ac = contest_submissions.filter(status__in=['AC', 'ac', 'correct', 'Correct', 'accepted']).count()
                 contest_total = contest_submissions.count()
                 
                 contests_list.append({
@@ -973,7 +973,7 @@ class ProblemRecommendationView(APIView):
             # Lấy danh sách bài đã giải của user (AC only)
             solved_submissions = Submissions.objects.filter(
                 user=user,
-                status='ac',
+                status__in=['AC', 'ac', 'correct', 'Correct', 'accepted'],
                 contest__isnull=True  # Practice mode only
             ).values_list('problem_id', flat=True).distinct()
             
