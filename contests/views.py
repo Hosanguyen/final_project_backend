@@ -452,6 +452,9 @@ class ContestDetailUserView(APIView):
             page = int(request.query_params.get('page', 1))
             page_size = int(request.query_params.get('page_size', 20))
             search_query = request.query_params.get('search', '').strip()
+            status_filter = request.query_params.get('status', 'all')  # all, solved, unsolved
+            difficulty_filter = request.query_params.get('difficulty', 'all')  # all, easy, medium, hard
+            tag_filter = request.query_params.get('tag', '')  # tag id or slug
             
             # Validate pagination parameters
             if page < 1:
@@ -460,7 +463,7 @@ class ContestDetailUserView(APIView):
                 page_size = 20
             
             # Get all contest problems with search filtering
-            contest_problems = ContestProblem.objects.filter(contest=contest).select_related('problem')
+            contest_problems = ContestProblem.objects.filter(contest=contest).select_related('problem').prefetch_related('problem__tags')
             
             # Apply search filter if query provided
             if search_query:
@@ -468,6 +471,45 @@ class ContestDetailUserView(APIView):
                     Q(problem__title__icontains=search_query) |
                     Q(problem__slug__icontains=search_query)
                 )
+            
+            # Apply difficulty filter
+            if difficulty_filter != 'all':
+                contest_problems = contest_problems.filter(problem__difficulty__iexact=difficulty_filter)
+            
+            # Apply tag filter
+            if tag_filter:
+                # Support both tag id and tag slug
+                if tag_filter.isdigit():
+                    contest_problems = contest_problems.filter(problem__tags__id=int(tag_filter))
+                else:
+                    contest_problems = contest_problems.filter(problem__tags__slug__iexact=tag_filter)
+            
+            # Get user stats for filtering and statistics
+            user = request.user if request.user.is_authenticated else None
+            user_solved_problem_ids = set()
+            user_attempted_problem_ids = set()  # All problems with any submission
+            
+            if user:
+                # Get all submissions for this user in practice contest
+                user_submissions = Submissions.objects.filter(
+                    user=user,
+                    contest=contest
+                ).values('problem_id', 'status')
+                
+                for sub in user_submissions:
+                    problem_id = sub['problem_id']
+                    sub_status = sub['status']
+                    # Add to attempted (any problem with submission)
+                    user_attempted_problem_ids.add(problem_id)
+                    # Add to solved if AC
+                    if sub_status in ['AC', 'ac', 'correct', 'Correct', 'accepted']:
+                        user_solved_problem_ids.add(problem_id)
+            
+            # Apply status filter
+            if status_filter == 'solved' and user:
+                contest_problems = contest_problems.filter(problem_id__in=user_solved_problem_ids)
+            elif status_filter == 'unsolved' and user:
+                contest_problems = contest_problems.exclude(problem_id__in=user_solved_problem_ids)
             
             contest_problems = contest_problems.order_by('sequence')
             total_count = contest_problems.count()
@@ -490,6 +532,19 @@ class ContestDetailUserView(APIView):
             # Calculate pagination info
             total_pages = (total_count + page_size - 1) // page_size
             
+            # Calculate total stats (without filters except search)
+            all_problems_qs = ContestProblem.objects.filter(contest=contest)
+            if search_query:
+                all_problems_qs = all_problems_qs.filter(
+                    Q(problem__title__icontains=search_query) |
+                    Q(problem__slug__icontains=search_query)
+                )
+            total_problems = all_problems_qs.count()
+            
+            # User stats across all problems (not just current page)
+            total_solved = len(user_solved_problem_ids) if user else 0
+            total_attempted = len(user_attempted_problem_ids) if user else 0
+            
             return Response({
                 'id': contest.id,
                 'slug': contest.slug,
@@ -506,6 +561,11 @@ class ContestDetailUserView(APIView):
                     'total_pages': total_pages,
                     'has_next': page < total_pages,
                     'has_previous': page > 1
+                },
+                'user_stats': {
+                    'total_problems': total_problems,
+                    'solved': total_solved,
+                    'attempted': total_attempted
                 }
             }, status=status.HTTP_200_OK)
         except Contest.DoesNotExist:
@@ -1404,6 +1464,32 @@ class ContestLeaderboardView(APIView):
                 'color': cp.color or '',
                 'rgb': cp.rgb or ''
             } for cp in contest_problems]
+            
+            # For practice contest, ensure all users with submissions are participants
+            if contest.slug == 'practice':
+                # Get all unique users who have submitted to practice contest
+                users_with_submissions = Submissions.objects.filter(
+                    contest=contest,
+                    submitted_at__gte=contest.start_at,
+                    submitted_at__lte=contest.end_at
+                ).values_list('user_id', flat=True).distinct()
+                
+                # Get existing participant user IDs
+                existing_participant_ids = set(
+                    ContestParticipant.objects.filter(contest=contest).values_list('user_id', flat=True)
+                )
+                
+                # Create participants for users who have submissions but are not participants
+                new_participant_ids = set(users_with_submissions) - existing_participant_ids
+                if new_participant_ids:
+                    from users.models import User
+                    for user_id in new_participant_ids:
+                        try:
+                            user = User.objects.get(id=user_id)
+                            # Create participant and calculate ranking
+                            ContestRankingService.update_user_ranking(contest.id, user_id)
+                        except User.DoesNotExist:
+                            continue
             
             # Get rankings - limit to top 100 for practice contest
             participants = ContestRankingService.get_contest_leaderboard(contest_id)
