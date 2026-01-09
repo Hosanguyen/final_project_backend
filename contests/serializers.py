@@ -9,13 +9,18 @@ class ContestProblemSerializer(serializers.ModelSerializer):
     problem_title = serializers.CharField(source='problem.title', read_only=True)
     problem_slug = serializers.CharField(source='problem.slug', read_only=True)
     problem_difficulty = serializers.CharField(source='problem.difficulty', read_only=True)
+    problem_tags = serializers.SerializerMethodField()
     user_status = serializers.SerializerMethodField()
     
     class Meta:
         model = ContestProblem
         fields = ['id', 'problem_id', 'problem_title', 'problem_slug', 'problem_difficulty',
-                  'sequence', 'alias', 'label', 'color', 'rgb', 'point', 'lazy_eval_results',
+                  'problem_tags', 'sequence', 'alias', 'label', 'color', 'rgb', 'point', 'lazy_eval_results',
                   'user_status']
+    
+    def get_problem_tags(self, obj):
+        """Get tags for this problem"""
+        return [{'id': tag.id, 'name': tag.name, 'slug': tag.slug} for tag in obj.problem.tags.all()]
     
     def get_user_status(self, obj):
         """Get user's submission status for this problem in this contest"""

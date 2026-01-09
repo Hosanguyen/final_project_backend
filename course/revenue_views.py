@@ -47,10 +47,20 @@ class RevenueStatisticsView(APIView):
             total=Sum('amount')
         )['total'] or 0
         
-        # Tổng số đơn hàng
-        total_orders = orders_qs.count()
+        # Tổng số đơn hàng (tất cả đơn, không chỉ completed)
+        all_orders_for_count = Order.objects.all()
+        if month_param:
+            try:
+                year, month = map(int, month_param.split('-'))
+                all_orders_for_count = all_orders_for_count.filter(
+                    created_at__year=year,
+                    created_at__month=month
+                )
+            except (ValueError, AttributeError):
+                pass
+        total_orders = all_orders_for_count.count()
         
-        # Số khách hàng unique
+        # Số khách hàng unique (từ completed orders)
         unique_customers = orders_qs.values('user').distinct().count()
         
         # Giá trị đơn hàng trung bình

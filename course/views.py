@@ -1217,3 +1217,173 @@ class VideoInfoView(APIView):
             "stream_url": f"/api/video/stream/{resource_id}/",
         }, status=status.HTTP_200_OK)
 
+
+# ===== Admin Order Management Views =====
+
+class AdminOrderListView(APIView):
+    """Admin: Quản lý danh sách đơn hàng"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Lấy danh sách tất cả orders với filter và pagination"""
+        if not request.user.has_perm('orders.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem danh sách đơn hàng. Yêu cầu quyền: orders.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        orders = Order.objects.select_related('user', 'course').all()
+        
+        # Search
+        search = request.query_params.get('search')
+        if search:
+            orders = orders.filter(
+                Q(order_code__icontains=search) |
+                Q(user__username__icontains=search) |
+                Q(user__email__icontains=search) |
+                Q(course__title__icontains=search)
+            )
+        
+        # Filter by status
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            orders = orders.filter(status=status_filter)
+        
+        # Filter by payment method
+        payment_method = request.query_params.get('payment_method')
+        if payment_method:
+            orders = orders.filter(payment_method=payment_method)
+        
+        # Order by
+        ordering = request.query_params.get('ordering', '-created_at')
+        orders = orders.order_by(ordering)
+        
+        # Pagination
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+        
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 100:
+            page_size = 10
+        
+        total_count = orders.count()
+        paginator = Paginator(orders, page_size)
+        
+        try:
+            orders_page = paginator.page(page)
+        except EmptyPage:
+            orders_page = []
+        
+        serializer = OrderSerializer(orders_page, many=True)
+        return Response({
+            'results': serializer.data,
+            'total': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': paginator.num_pages
+        }, status=status.HTTP_200_OK)
+
+
+class AdminOrderDetailView(APIView):
+    """Admin: Chi tiết và cập nhật đơn hàng"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self, pk):
+        try:
+            return Order.objects.select_related('user', 'course').get(pk=pk)
+        except Order.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        """Lấy chi tiết đơn hàng"""
+        if not request.user.has_perm('orders.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xem đơn hàng. Yêu cầu quyền: orders.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        order = self.get_object(pk)
+        if not order:
+            return Response({"detail": "Không tìm thấy đơn hàng"}, status=status.HTTP_404_NOT_FOUND)
+        
+        serializer = OrderSerializer(order)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def patch(self, request, pk):
+        """Cập nhật trạng thái đơn hàng"""
+        if not request.user.has_perm('orders.update'):
+            return Response(
+                {"detail": "Bạn không có quyền cập nhật đơn hàng. Yêu cầu quyền: orders.update"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        order = self.get_object(pk)
+        if not order:
+            return Response({"detail": "Không tìm thấy đơn hàng"}, status=status.HTTP_404_NOT_FOUND)
+        
+        serializer = OrderSerializer(order, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AdminOrderExportView(APIView):
+    """Admin: Xuất danh sách đơn hàng ra CSV"""
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Xuất danh sách orders ra CSV"""
+        if not request.user.has_perm('orders.read'):
+            return Response(
+                {"detail": "Bạn không có quyền xuất đơn hàng. Yêu cầu quyền: orders.read"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        import csv
+        from django.http import HttpResponse
+        
+        orders = Order.objects.select_related('user', 'course').all()
+        
+        # Apply same filters
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            orders = orders.filter(status=status_filter)
+        
+        payment_method = request.query_params.get('payment_method')
+        if payment_method:
+            orders = orders.filter(payment_method=payment_method)
+        
+        orders = orders.order_by('-created_at')
+        
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="orders.csv"'
+        response.write('\ufeff')  # BOM for UTF-8
+        
+        writer = csv.writer(response)
+        writer.writerow([
+            'Mã đơn hàng', 'Username', 'Email', 'Khóa học', 
+            'Số tiền', 'Phương thức', 'Trạng thái',
+            'Mã GD VNPay', 'Ngân hàng', 'Ngày tạo', 'Ngày hoàn thành'
+        ])
+        
+        for order in orders:
+            writer.writerow([
+                order.order_code,
+                order.user.username if order.user else '',
+                order.user.email if order.user else '',
+                order.course.title if order.course else '',
+                order.amount,
+                order.payment_method,
+                order.status,
+                order.vnp_transaction_no or '',
+                order.vnp_bank_code or '',
+                order.created_at.strftime('%Y-%m-%d %H:%M:%S') if order.created_at else '',
+                order.completed_at.strftime('%Y-%m-%d %H:%M:%S') if order.completed_at else ''
+            ])
+        
+        return response

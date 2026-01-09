@@ -452,6 +452,9 @@ class ContestDetailUserView(APIView):
             page = int(request.query_params.get('page', 1))
             page_size = int(request.query_params.get('page_size', 20))
             search_query = request.query_params.get('search', '').strip()
+            status_filter = request.query_params.get('status', 'all')  # all, solved, unsolved
+            difficulty_filter = request.query_params.get('difficulty', 'all')  # all, easy, medium, hard
+            tag_filter = request.query_params.get('tag', '')  # tag id or slug
             
             # Validate pagination parameters
             if page < 1:
@@ -460,7 +463,7 @@ class ContestDetailUserView(APIView):
                 page_size = 20
             
             # Get all contest problems with search filtering
-            contest_problems = ContestProblem.objects.filter(contest=contest).select_related('problem')
+            contest_problems = ContestProblem.objects.filter(contest=contest).select_related('problem').prefetch_related('problem__tags')
             
             # Apply search filter if query provided
             if search_query:
@@ -468,6 +471,45 @@ class ContestDetailUserView(APIView):
                     Q(problem__title__icontains=search_query) |
                     Q(problem__slug__icontains=search_query)
                 )
+            
+            # Apply difficulty filter
+            if difficulty_filter != 'all':
+                contest_problems = contest_problems.filter(problem__difficulty__iexact=difficulty_filter)
+            
+            # Apply tag filter
+            if tag_filter:
+                # Support both tag id and tag slug
+                if tag_filter.isdigit():
+                    contest_problems = contest_problems.filter(problem__tags__id=int(tag_filter))
+                else:
+                    contest_problems = contest_problems.filter(problem__tags__slug__iexact=tag_filter)
+            
+            # Get user stats for filtering and statistics
+            user = request.user if request.user.is_authenticated else None
+            user_solved_problem_ids = set()
+            user_attempted_problem_ids = set()  # All problems with any submission
+            
+            if user:
+                # Get all submissions for this user in practice contest
+                user_submissions = Submissions.objects.filter(
+                    user=user,
+                    contest=contest
+                ).values('problem_id', 'status')
+                
+                for sub in user_submissions:
+                    problem_id = sub['problem_id']
+                    sub_status = sub['status']
+                    # Add to attempted (any problem with submission)
+                    user_attempted_problem_ids.add(problem_id)
+                    # Add to solved if AC
+                    if sub_status in ['AC', 'ac', 'correct', 'Correct', 'accepted']:
+                        user_solved_problem_ids.add(problem_id)
+            
+            # Apply status filter
+            if status_filter == 'solved' and user:
+                contest_problems = contest_problems.filter(problem_id__in=user_solved_problem_ids)
+            elif status_filter == 'unsolved' and user:
+                contest_problems = contest_problems.exclude(problem_id__in=user_solved_problem_ids)
             
             contest_problems = contest_problems.order_by('sequence')
             total_count = contest_problems.count()
@@ -490,6 +532,19 @@ class ContestDetailUserView(APIView):
             # Calculate pagination info
             total_pages = (total_count + page_size - 1) // page_size
             
+            # Calculate total stats (without filters except search)
+            all_problems_qs = ContestProblem.objects.filter(contest=contest)
+            if search_query:
+                all_problems_qs = all_problems_qs.filter(
+                    Q(problem__title__icontains=search_query) |
+                    Q(problem__slug__icontains=search_query)
+                )
+            total_problems = all_problems_qs.count()
+            
+            # User stats across all problems (not just current page)
+            total_solved = len(user_solved_problem_ids) if user else 0
+            total_attempted = len(user_attempted_problem_ids) if user else 0
+            
             return Response({
                 'id': contest.id,
                 'slug': contest.slug,
@@ -506,6 +561,11 @@ class ContestDetailUserView(APIView):
                     'total_pages': total_pages,
                     'has_next': page < total_pages,
                     'has_previous': page > 1
+                },
+                'user_stats': {
+                    'total_problems': total_problems,
+                    'solved': total_solved,
+                    'attempted': total_attempted
                 }
             }, status=status.HTTP_200_OK)
         except Contest.DoesNotExist:
@@ -930,9 +990,30 @@ class ContestDetailStatisticsView(APIView):
                     'error': 'Contest không tồn tại'
                 }, status=status.HTTP_404_NOT_FOUND)
             
+            # Get pagination and search params for problems
+            problem_page = int(request.query_params.get('problem_page', 1))
+            problem_page_size = int(request.query_params.get('problem_page_size', 6))
+            problem_search = request.query_params.get('problem_search', '').strip()
+            
             # Get contest problems
-            contest_problems = ContestProblem.objects.filter(contest=contest).select_related('problem')
-            total_problems = contest_problems.count()
+            contest_problems_qs = ContestProblem.objects.filter(contest=contest).select_related('problem')
+            
+            # Apply search filter if provided
+            if problem_search:
+                contest_problems_qs = contest_problems_qs.filter(
+                    Q(problem__title__icontains=problem_search) | 
+                    Q(alias__icontains=problem_search)
+                )
+            
+            total_problems = contest_problems_qs.count()
+            
+            # Paginate problems
+            problem_start = (problem_page - 1) * problem_page_size
+            problem_end = problem_start + problem_page_size
+            contest_problems = contest_problems_qs.order_by('sequence')[problem_start:problem_end]
+            
+            # Get all contest problems for other calculations (without pagination)
+            all_contest_problems = ContestProblem.objects.filter(contest=contest).select_related('problem')
             
             # Get participants stats
             participants = ContestParticipant.objects.filter(contest=contest)
@@ -952,14 +1033,14 @@ class ContestDetailStatisticsView(APIView):
             ).order_by('-count')
             
             # Calculate acceptance rate
-            accepted_submissions = submissions.filter(status='AC').count()
+            accepted_submissions = submissions.filter(status__in=['AC', 'ac', 'correct', 'Correct', 'accepted']).count()
             acceptance_rate = round((accepted_submissions / total_submissions * 100) if total_submissions > 0 else 0, 2)
             
-            # Submissions by problem
+            # Submissions by problem (only for paginated problems)
             problem_stats = []
             for cp in contest_problems:
                 problem_submissions = submissions.filter(problem=cp.problem)
-                problem_accepted = problem_submissions.filter(status='AC').count()
+                problem_accepted = problem_submissions.filter(status__in=['AC', 'ac', 'correct', 'Correct', 'accepted']).count()
                 problem_total = problem_submissions.count()
                 
                 problem_stats.append({
@@ -978,7 +1059,7 @@ class ContestDetailStatisticsView(APIView):
             
             for participant in top_participants:
                 user_submissions = submissions.filter(user=participant.user)
-                user_ac = user_submissions.filter(status='AC').count()
+                user_ac = user_submissions.filter(status__in=['AC', 'ac', 'correct', 'Correct', 'accepted']).count()
                 
                 top_participants_data.append({
                     'user_id': participant.user.id,
@@ -1006,7 +1087,7 @@ class ContestDetailStatisticsView(APIView):
             ).order_by('day')
             
             # Error distribution (non-AC submissions)
-            error_stats = submissions.exclude(status='AC').values('status').annotate(
+            error_stats = submissions.exclude(status__in=['AC', 'ac', 'correct', 'Correct', 'accepted']).values('status').annotate(
                 count=Count('id')
             ).order_by('-count')
             
@@ -1018,7 +1099,7 @@ class ContestDetailStatisticsView(APIView):
             recent_submissions_data = []
             
             # Create a map of problem_id to contest_problem for alias lookup
-            problem_alias_map = {cp.problem.id: cp.alias for cp in contest_problems}
+            problem_alias_map = {cp.problem.id: cp.alias for cp in all_contest_problems}
             
             for sub in recent_submissions:
                 recent_submissions_data.append({
@@ -1045,8 +1126,14 @@ class ContestDetailStatisticsView(APIView):
                 },
                 'statistics': {
                     'problems': {
-                        'total': total_problems,
-                        'by_problem': problem_stats
+                        'total': all_contest_problems.count(),
+                        'by_problem': problem_stats,
+                        'pagination': {
+                            'current_page': problem_page,
+                            'page_size': problem_page_size,
+                            'total_items': total_problems,
+                            'total_pages': (total_problems + problem_page_size - 1) // problem_page_size
+                        }
                     },
                     'participants': {
                         'total': total_participants,
@@ -1378,6 +1465,32 @@ class ContestLeaderboardView(APIView):
                 'rgb': cp.rgb or ''
             } for cp in contest_problems]
             
+            # For practice contest, ensure all users with submissions are participants
+            if contest.slug == 'practice':
+                # Get all unique users who have submitted to practice contest
+                users_with_submissions = Submissions.objects.filter(
+                    contest=contest,
+                    submitted_at__gte=contest.start_at,
+                    submitted_at__lte=contest.end_at
+                ).values_list('user_id', flat=True).distinct()
+                
+                # Get existing participant user IDs
+                existing_participant_ids = set(
+                    ContestParticipant.objects.filter(contest=contest).values_list('user_id', flat=True)
+                )
+                
+                # Create participants for users who have submissions but are not participants
+                new_participant_ids = set(users_with_submissions) - existing_participant_ids
+                if new_participant_ids:
+                    from users.models import User
+                    for user_id in new_participant_ids:
+                        try:
+                            user = User.objects.get(id=user_id)
+                            # Create participant and calculate ranking
+                            ContestRankingService.update_user_ranking(contest.id, user_id)
+                        except User.DoesNotExist:
+                            continue
+            
             # Get rankings - limit to top 100 for practice contest
             participants = ContestRankingService.get_contest_leaderboard(contest_id)
             if contest.slug == 'practice':
@@ -1579,10 +1692,11 @@ class ContestStatisticsView(APIView):
                     })
                 practice_participants = ContestParticipant.objects.filter(**practice_part_filter).count()
                 
-                # Practice accepted submissions
-                practice_accepted_filter = practice_sub_filter.copy()
-                practice_accepted_filter['status'] = 'correct'
-                practice_accepted = Submissions.objects.filter(**practice_accepted_filter).count()
+                # Practice accepted submissions - use status__in to handle multiple accepted status values
+                practice_accepted = Submissions.objects.filter(
+                    **practice_sub_filter,
+                    status__in=['AC', 'ac', 'correct', 'Correct', 'accepted']
+                ).count()
                 
                 practice_stats = {
                     'contest_id': practice_contest.id,
@@ -1647,10 +1761,11 @@ class ContestStatisticsView(APIView):
                 })
             total_submissions = Submissions.objects.filter(**submission_filter).count()
             
-            # Accepted submissions
-            accepted_filter = submission_filter.copy()
-            accepted_filter['status'] = 'correct'
-            accepted_submissions = Submissions.objects.filter(**accepted_filter).count()
+            # Accepted submissions - use status__in to handle multiple accepted status values
+            accepted_submissions = Submissions.objects.filter(
+                **submission_filter,
+                status__in=['AC', 'ac', 'correct', 'Correct', 'accepted']
+            ).count()
             
             # Submission statistics by status for contests
             submission_stats = Submissions.objects.filter(**submission_filter).values('status').annotate(count=Count('id')).order_by('-count')

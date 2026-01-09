@@ -7,7 +7,8 @@ from .views import (
     TagView, TagDetailView,
     CreatePaymentView, VNPayReturnView, CheckPaymentStatusView,
     OrderHistoryView, CheckEnrollmentView, EnrollmentListView,
-    VideoStreamView, VideoInfoView
+    VideoStreamView, VideoInfoView,
+    AdminOrderListView, AdminOrderDetailView, AdminOrderExportView
 )
 from .course_reports_views import (
     CourseReportsStatsView,
@@ -56,6 +57,11 @@ urlpatterns = [
     path("video/stream/<int:resource_id>/", VideoStreamView.as_view(), name="video-stream"),
     path("video/info/<int:resource_id>/", VideoInfoView.as_view(), name="video-info"),
     
+    # Admin Order Management URLs
+    path("admin/orders/", AdminOrderListView.as_view(), name="admin-order-list"),
+    path("admin/orders/export/", AdminOrderExportView.as_view(), name="admin-order-export"),
+    path("admin/orders/<int:pk>/", AdminOrderDetailView.as_view(), name="admin-order-detail"),
+    
     # Reports URLs
     path("courses/reports/stats/", CourseReportsStatsView.as_view(), name="course-reports-stats"),
     path("courses/reports/top-courses/", CourseReportsTopCoursesView.as_view(), name="course-reports-top-courses"),
@@ -68,3 +74,4 @@ urlpatterns = [
     # Revenue Statistics URLs
     path("revenue/statistics/", RevenueStatisticsView.as_view(), name="revenue-statistics"),
 ]
+
